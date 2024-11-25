@@ -1,4 +1,8 @@
 use rhai::{Expr, Stmt};
+pub use rhai;
+
+static COMPILE_ENGINE: std::sync::LazyLock<rhai::Engine> =
+    std::sync::LazyLock::new(|| rhai::Engine::new_raw());
 
 #[cfg(feature = "size16")]
 pub type OpSize = u16;
@@ -7,13 +11,16 @@ pub type OpSize = u32;
 #[cfg(feature = "size64")]
 pub type OpSize = u64;
 
+pub type INT = rhai::INT;
+pub type FLOAT = rhai::FLOAT;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum ByteCode {
     DynamicConstant(rhai::Dynamic),
     UnitConstant,
     BoolConstant(bool),
-    IntegerConstant(rhai::INT),
-    FloatConstant(rhai::FLOAT),
+    IntegerConstant(INT),
+    FloatConstant(FLOAT),
     CharConstant(char),
     StringConstant(String),
     InterpolatedString(OpSize),
@@ -27,7 +34,7 @@ pub enum ByteCode {
     VarInit(OpSize),
     Index,
     Return,
-    PopStack
+    PopStack,
 }
 
 pub trait DynamicValue: Sized + Clone {
@@ -38,10 +45,10 @@ pub trait DynamicValue: Sized + Clone {
     fn from_bool(v: bool) -> anyhow::Result<Self> {
         return Self::from_dynamic(rhai::Dynamic::from(v));
     }
-    fn from_integer(v: rhai::INT) -> anyhow::Result<Self> {
+    fn from_integer(v: INT) -> anyhow::Result<Self> {
         return Self::from_dynamic(rhai::Dynamic::from(v));
     }
-    fn from_float(v: rhai::FLOAT) -> anyhow::Result<Self> {
+    fn from_float(v: FLOAT) -> anyhow::Result<Self> {
         return Self::from_dynamic(rhai::Dynamic::from(v));
     }
     fn from_char(v: char) -> anyhow::Result<Self> {
@@ -55,40 +62,45 @@ pub trait DynamicValue: Sized + Clone {
     fn is_unit(&self, variables: &Vec<Self>) -> anyhow::Result<bool>;
     fn to_bool(&self, variables: &Vec<Self>) -> anyhow::Result<bool>;
     fn to_size(&self, variables: &Vec<Self>) -> anyhow::Result<OpSize>;
-    //fn to_float(&self, variables: &Vec<Self>) -> anyhow::Result<rhai::FLOAT>;
-    fn deref<'a>(&'a self, variables: &'a Vec<Self>)->anyhow::Result<&'a Self>;
-    //fn deref_mut<'a>(&'a mut self, variables: &'a mut Vec<Self>) -> anyhow::Result<&mut Self>;
+    fn deref<'a>(&'a self, variables: &'a Vec<Self>) -> anyhow::Result<&'a Self>;
     fn deref_mut<'a>(&self, variables: &'a mut Vec<Self>) -> anyhow::Result<&'a mut Self>;
     fn ref_append_index(&mut self, ind: OpSize) -> anyhow::Result<()>;
 }
 
 pub struct Executer<T: DynamicValue> {
     fn_names: Vec<String>,
-    fns: Vec<Box<dyn Fn(Vec<T>,&mut Vec<T>) -> anyhow::Result<T>>>,
+    fns: Vec<Box<dyn Fn(Vec<T>, &mut Vec<T>) -> anyhow::Result<T>>>,
 }
 
 impl<T: DynamicValue> Executer<T> {
     pub fn new() -> Self {
-        return Self { fn_names: vec![], fns: vec![] };
+        return Self {
+            fn_names: vec![],
+            fns: vec![],
+        };
     }
     fn function_names(&self) -> &Vec<String> {
         return &self.fn_names;
     }
-    pub fn add_fn(&mut self, name: String, func: Box<dyn Fn(Vec<T>,&mut Vec<T>) -> anyhow::Result<T>>)->anyhow::Result<()> {
+    pub fn add_fn(
+        &mut self,
+        name: String,
+        func: Box<dyn Fn(Vec<T>, &mut Vec<T>) -> anyhow::Result<T>>,
+    ) -> anyhow::Result<()> {
         if self.fn_names.contains(&name) {
-            anyhow::bail!("Function \"{}\" already exists!",name);
-        }else{
+            anyhow::bail!("Function \"{}\" already exists!", name);
+        } else {
             self.fns.push(func);
             self.fn_names.push(name);
             return Ok(());
         }
     }
-    fn call_fn(&self,index:OpSize, args: Vec<T>,variables: &mut Vec<T>) ->anyhow::Result<T> {
-        let ind=index as usize;
-        if  ind >= self.fns.len(){
-            anyhow::bail!("Function #{} does not exist!",index);
-        } else{
-            return self.fns[ind](args,variables);
+    fn call_fn(&self, index: OpSize, args: Vec<T>, variables: &mut Vec<T>) -> anyhow::Result<T> {
+        let ind = index as usize;
+        if ind >= self.fns.len() {
+            anyhow::bail!("Function #{} does not exist!", index);
+        } else {
+            return self.fns[ind](args, variables);
         }
     }
 }
@@ -554,6 +566,24 @@ pub fn ast_to_byte_codes<T: DynamicValue>(
     return Ok(byte_codes);
 }
 
+pub fn script_to_byte_codes<T: DynamicValue>(
+    executer: &Executer<T>,
+    initial_variables: &mut Vec<String>,
+    script: &str,
+) -> anyhow::Result<Vec<ByteCode>> {
+    let ast = COMPILE_ENGINE.compile(script)?;
+    return ast_to_byte_codes(executer, initial_variables, &ast);
+}
+
+pub fn script_to_byte_codes_expression<T: DynamicValue>(
+    executer: &Executer<T>,
+    initial_variables: &mut Vec<String>,
+    script: &str,
+) -> anyhow::Result<Vec<ByteCode>> {
+    let ast = COMPILE_ENGINE.compile_expression(script)?;
+    return ast_to_byte_codes(executer, initial_variables, &ast);
+}
+
 pub fn run_byte_codes<T: DynamicValue>(
     executer: &Executer<T>,
     byte_codes: &Vec<ByteCode>,
@@ -593,7 +623,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             ByteCode::InterpolatedString(_) => {
                 anyhow::bail!("InterpolatedString not supported yet!");
             }
-            ByteCode::ConstructArray(l) => {
+            ByteCode::ConstructArray(_) => {
                 anyhow::bail!("ConstructArray not supported yet!");
                 // let mut arr = Vec::<rhai::Dynamic>::with_capacity(*l as usize);
                 // if variable_stack.len() < *l as usize {
@@ -663,23 +693,19 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for variable declare!");
                 }
             },
-            ByteCode::Index => {
-                match variable_stack.pop() {
-                    Some(ind) => {
-                        match variable_stack.last_mut() {
-                            Some(r) => {
-                                r.ref_append_index(ind.to_size(&variables)?)?;
-                            }
-                            None => {
-                                anyhow::bail!("Not enough arguments for index!");
-                            }
-                        }
+            ByteCode::Index => match variable_stack.pop() {
+                Some(ind) => match variable_stack.last_mut() {
+                    Some(r) => {
+                        r.ref_append_index(ind.to_size(&variables)?)?;
                     }
                     None => {
                         anyhow::bail!("Not enough arguments for index!");
                     }
+                },
+                None => {
+                    anyhow::bail!("Not enough arguments for index!");
                 }
-            }
+            },
             ByteCode::Return => match variable_stack.pop() {
                 Some(value) => {
                     return Ok(value);
@@ -687,12 +713,12 @@ pub fn run_byte_codes<T: DynamicValue>(
                 None => {
                     anyhow::bail!("Missing return value!");
                 }
-            }
+            },
             ByteCode::PopStack => {
                 variable_stack.pop();
             }
         }
-        pos+=1;
+        pos += 1;
     }
     //println!("Stack size: {}",variable_stack.len());
     match variable_stack.pop() {

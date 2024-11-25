@@ -1,17 +1,17 @@
-use rhai::{Engine, EvalAltResult};
+use rhai_bytecode::rhai::{Engine, EvalAltResult};
 use rhai_bytecode::{self, DynamicValue};
 
 #[derive(Clone, Debug)]
 enum SimpleDynamicValue {
     Unit,
     Bool(bool),
-    Integer(rhai::INT),
-    Float(rhai::FLOAT),
+    Integer(rhai_bytecode::INT),
+    Float(rhai_bytecode::FLOAT),
     VariableRef(rhai_bytecode::OpSize, Vec<rhai_bytecode::OpSize>),
 }
 
 impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
-    fn from_dynamic(dynamic: rhai::Dynamic) -> anyhow::Result<Self> {
+    fn from_dynamic(dynamic: rhai_bytecode::rhai::Dynamic) -> anyhow::Result<Self> {
         // If Dynamic.0 is pub instead of pub(create) with "internal", these could be easier to implement through match.
         if dynamic.is_unit() {
             return Self::from_unit();
@@ -65,14 +65,14 @@ impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
 
     fn from_char(v: char) -> anyhow::Result<Self> {
         // Simplely, we'll just cast the char as an integer.
-        return Ok(SimpleDynamicValue::Integer(v as rhai::INT));
+        return Ok(SimpleDynamicValue::Integer(v as rhai_bytecode::INT));
     }
 
-    fn from_integer(v: rhai::INT) -> anyhow::Result<Self> {
+    fn from_integer(v: rhai_bytecode::INT) -> anyhow::Result<Self> {
         return Ok(SimpleDynamicValue::Integer(v));
     }
 
-    fn from_float(v: rhai::FLOAT) -> anyhow::Result<Self> {
+    fn from_float(v: rhai_bytecode::FLOAT) -> anyhow::Result<Self> {
         return Ok(SimpleDynamicValue::Float(v));
     }
 
@@ -167,7 +167,7 @@ impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
 
     fn ref_append_index(&mut self, ind: rhai_bytecode::OpSize) -> anyhow::Result<()> {
         match self {
-            SimpleDynamicValue::VariableRef(var_id, indexes) => {
+            SimpleDynamicValue::VariableRef(_, indexes) => {
                 indexes.push(ind);
                 return Ok(());
             }
@@ -195,13 +195,13 @@ fn greater_than(
                 return Ok(SimpleDynamicValue::Bool(*va > *vb));
             }
             (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(*va as rhai::FLOAT > *vb));
+                return Ok(SimpleDynamicValue::Bool(*va as rhai_bytecode::FLOAT > *vb));
             }
             (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
                 return Ok(SimpleDynamicValue::Bool(*va > *vb));
             }
             (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(*va > *vb as rhai::FLOAT));
+                return Ok(SimpleDynamicValue::Bool(*va > *vb as rhai_bytecode::FLOAT));
             }
             _ => {
                 anyhow::bail!(
@@ -234,7 +234,7 @@ fn minus_assign(
                 SimpleDynamicValue::Float(*va - *vb)
             }
             (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                SimpleDynamicValue::Float(*va - *vb as rhai::FLOAT)
+                SimpleDynamicValue::Float(*va - *vb as rhai_bytecode::FLOAT)
             }
             _ => {
                 anyhow::bail!(
@@ -255,7 +255,7 @@ fn main() -> Result<(), Box<EvalAltResult>> {
 while x > 0 {
 x -= 1;
 }";
-    let engine = Engine::new();
+    let engine = Engine::new_raw();
     let ast = engine.compile(script)?;
     let mut executer = rhai_bytecode::Executer::<SimpleDynamicValue>::new();
     executer
