@@ -1,5 +1,5 @@
-use rhai::{Expr, Stmt};
 pub use rhai;
+use rhai::{Expr, Stmt};
 
 static COMPILE_ENGINE: std::sync::LazyLock<rhai::Engine> =
     std::sync::LazyLock::new(|| rhai::Engine::new_raw());
@@ -563,6 +563,15 @@ pub fn ast_to_byte_codes<T: DynamicValue>(
     if !break_pos.is_empty() || !continue_pos.is_empty() {
         anyhow::bail!("Invalid \"break\" or \"continue\" statements without a loop!");
     }
+    match byte_codes.last() {
+        Some(code) => match code {
+            ByteCode::PopStack => {
+                byte_codes.pop();
+            }
+            _ => {}
+        },
+        None => {}
+    }
     return Ok(byte_codes);
 }
 
@@ -582,6 +591,22 @@ pub fn script_to_byte_codes_expression<T: DynamicValue>(
 ) -> anyhow::Result<Vec<ByteCode>> {
     let ast = COMPILE_ENGINE.compile_expression(script)?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
+}
+
+pub fn script_to_byte_codes_expression_no_new_variables<T: DynamicValue>(
+    executer: &Executer<T>,
+    initial_variables: &mut Vec<String>,
+    script: &str,
+) -> anyhow::Result<Vec<ByteCode>> {
+    let ast = COMPILE_ENGINE.compile_expression(script)?;
+    let init_len = initial_variables.len();
+    let res = ast_to_byte_codes(executer, initial_variables, &ast)?;
+    if initial_variables.len() != init_len {
+        initial_variables.truncate(init_len);
+        anyhow::bail!("The script should not create new variables!");
+    } else {
+        return Ok(res);
+    }
 }
 
 pub fn run_byte_codes<T: DynamicValue>(
