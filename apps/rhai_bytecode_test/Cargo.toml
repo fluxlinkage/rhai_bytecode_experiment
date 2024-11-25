@@ -1,0 +1,10 @@
+[package]
+name = "rhai_bytecode_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = {version="1"}
+serde_json = {version="1"}
+rhai={version="1.2",features=["no_object","no_time","no_function","no_module","no_custom_syntax","no_position","internals","unicode-xid-ident","serde"]}
+rhai_bytecode = { path = "../../crates/rhai_bytecode" }
