@@ -205,7 +205,7 @@ fn greater_than(
             }
             _ => {
                 anyhow::bail!(
-                    "Operator \">\" can only be applied to \"{:?}\" and \"{:?}\"!",
+                    "Operator \">\" can not be applied to \"{:?}\" and \"{:?}\"!",
                     a,
                     b
                 );
@@ -238,7 +238,7 @@ fn minus_assign(
             }
             _ => {
                 anyhow::bail!(
-                    "Operator \"-=\" can only be applied to \"{:?}\" and \"{:?}\"!",
+                    "Operator \"-=\" can not be applied to \"{:?}\" and \"{:?}\"!",
                     a,
                     b
                 );
