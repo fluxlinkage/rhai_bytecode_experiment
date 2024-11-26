@@ -106,7 +106,7 @@ impl<T: DynamicValue> Executer<T> {
 }
 
 fn find_index(vec: &Vec<String>, name: &str, type_str: &str) -> anyhow::Result<OpSize> {
-    match vec.iter().position(|x| x == name) {
+    match vec.iter().rposition(|x| x == name) {
         Some(i) => {
             return Ok(i as OpSize);
         }
@@ -116,21 +116,24 @@ fn find_index(vec: &Vec<String>, name: &str, type_str: &str) -> anyhow::Result<O
     }
 }
 
-fn find_index_auto_append(vec: &mut Vec<String>, name: &str) -> OpSize {
-    match vec.iter().position(|x| x == name) {
-        Some(i) => {
-            return i as OpSize;
-        }
-        None => {
-            vec.push(name.to_string());
-            return (vec.len() - 1) as OpSize;
-        }
-    }
+fn append_return_index(vec: &mut Vec<String>, name: &str) -> OpSize {
+    vec.push(name.to_string());
+    return (vec.len() - 1) as OpSize;
+    // match vec.iter().position(|x| x == name) {
+    //     Some(i) => {
+    //         return i as OpSize;
+    //     }
+    //     None => {
+    //         vec.push(name.to_string());
+    //         return (vec.len() - 1) as OpSize;
+    //     }
+    // }
 }
 
 fn append_expr(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
+    max_variable_count: &mut OpSize,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
     byte_codes: &mut Vec<ByteCode>,
@@ -160,6 +163,7 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -173,6 +177,7 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -204,6 +209,7 @@ fn append_expr(
                 append_stmt(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -216,6 +222,7 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -235,6 +242,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -243,6 +251,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -254,6 +263,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -264,6 +274,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -275,6 +286,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -285,6 +297,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -296,6 +309,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -306,6 +320,7 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -326,6 +341,7 @@ fn append_expr(
 fn append_stmt(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
+    max_variable_count: &mut OpSize,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
     byte_codes: &mut Vec<ByteCode>,
@@ -339,6 +355,7 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -346,29 +363,35 @@ fn append_stmt(
             )?;
             let jz_pos = byte_codes.len();
             byte_codes.push(ByteCode::JumpIfFalse(0));
+            let var_len=variables.len();
             for sub_stmt in &flow_control.body {
                 append_stmt(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
                     sub_stmt,
                 )?;
             }
+            variables.truncate(var_len);
             let jmp_pos = byte_codes.len();
             byte_codes.push(ByteCode::Jump(0));
             byte_codes[jz_pos] = ByteCode::JumpIfFalse(byte_codes.len() as OpSize);
+            let var_len=variables.len();
             for sub_stmt in &flow_control.branch {
                 append_stmt(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
                     sub_stmt,
                 )?;
             }
+            variables.truncate(var_len);
             byte_codes[jmp_pos] = ByteCode::Jump(byte_codes.len() as OpSize);
         }
         Stmt::Switch(..) => {
@@ -382,6 +405,7 @@ fn append_stmt(
                     append_expr(
                         functions,
                         variables,
+                        max_variable_count,
                         break_pos,
                         continue_pos,
                         byte_codes,
@@ -393,16 +417,19 @@ fn append_stmt(
             };
             let mut new_break_pos = Vec::<usize>::new();
             let mut new_continue_pos = Vec::<usize>::new();
+            let var_len=variables.len();
             for sub_stmt in &flow_control.body {
                 append_stmt(
                     functions,
                     variables,
+                    max_variable_count,
                     &mut new_break_pos,
                     &mut new_continue_pos,
                     byte_codes,
                     sub_stmt,
                 )?;
             }
+            variables.truncate(var_len);
             byte_codes.push(ByteCode::Jump(start_pos as OpSize));
             let end_pos = byte_codes.len();
             for pos_break in &new_break_pos {
@@ -425,12 +452,16 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
                 &data.1,
             )?;
-            let var_id = find_index_auto_append(variables, data.0.as_str());
+            let var_id = append_return_index(variables, data.0.as_str());
+            if var_id+1>*max_variable_count {
+                *max_variable_count=var_id+1;
+            }
             byte_codes.push(ByteCode::VarInit(var_id));
             byte_codes.push(ByteCode::PopStack);
         }
@@ -438,6 +469,7 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -446,6 +478,7 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -464,6 +497,7 @@ fn append_stmt(
                 append_expr(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -475,16 +509,19 @@ fn append_stmt(
             byte_codes.push(ByteCode::PopStack);
         }
         Stmt::Block(stmt_block) => {
+            let var_len=variables.len();
             for stmt in stmt_block.iter() {
                 append_stmt(
                     functions,
                     variables,
+                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
                     stmt,
                 )?;
             }
+            variables.truncate(var_len);
         }
         Stmt::TryCatch(..) => {
             anyhow::bail!("\"try\" not supported yet!");
@@ -493,6 +530,7 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
+                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -518,6 +556,7 @@ fn append_stmt(
                         append_expr(
                             functions,
                             variables,
+                            max_variable_count,
                             break_pos,
                             continue_pos,
                             byte_codes,
@@ -545,15 +584,17 @@ pub fn ast_to_byte_codes<T: DynamicValue>(
     executer: &Executer<T>,
     initial_variables: &mut Vec<String>,
     ast: &rhai::AST,
-) -> anyhow::Result<Vec<ByteCode>> {
+) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
     let functions = executer.function_names();
     let mut byte_codes = Vec::<ByteCode>::new();
     let mut break_pos = Vec::<usize>::new();
     let mut continue_pos = Vec::<usize>::new();
+    let mut max_variable_count=initial_variables.len() as OpSize;
     for stmt in ast.statements() {
         append_stmt(
             functions,
             initial_variables,
+            &mut max_variable_count,
             &mut break_pos,
             &mut continue_pos,
             &mut byte_codes,
@@ -572,14 +613,14 @@ pub fn ast_to_byte_codes<T: DynamicValue>(
         },
         None => {}
     }
-    return Ok(byte_codes);
+    return Ok((byte_codes,max_variable_count));
 }
 
 pub fn script_to_byte_codes<T: DynamicValue>(
     executer: &Executer<T>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode>> {
+) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
     let ast = COMPILE_ENGINE.compile(script)?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
@@ -588,7 +629,7 @@ pub fn script_to_byte_codes_expression<T: DynamicValue>(
     executer: &Executer<T>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode>> {
+) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
     let ast = COMPILE_ENGINE.compile_expression(script)?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
@@ -597,13 +638,13 @@ pub fn script_to_byte_codes_expression_no_new_variables<T: DynamicValue>(
     executer: &Executer<T>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode>> {
+) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
     let ast = COMPILE_ENGINE.compile_expression(script)?;
     let init_len = initial_variables.len();
     let res = ast_to_byte_codes(executer, initial_variables, &ast)?;
     if initial_variables.len() != init_len {
         initial_variables.truncate(init_len);
-        anyhow::bail!("The script should not create new variables!");
+        anyhow::bail!("The script should not declare new variables!");
     } else {
         return Ok(res);
     }

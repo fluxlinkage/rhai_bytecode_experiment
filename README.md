@@ -23,4 +23,3 @@ This will compile the provided Rhai script test, then run it.
 
 - Experiment Only! i.e. it is unstable and has bugs! Do not use this in production!
 - Many features (for, switch, try, etc) of Rhai not supported yet!
-- Local variables not supported! i.e. all the variables are treated as global.

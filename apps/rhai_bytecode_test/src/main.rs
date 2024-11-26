@@ -265,7 +265,7 @@ x -= 1;
         .add_fn("-=".to_string(), Box::new(minus_assign))
         .unwrap();
     let mut variable_names = Vec::<String>::new();
-    let byte_codes =
+    let (byte_codes,variable_count) =
         rhai_bytecode::ast_to_byte_codes(&executer, &mut variable_names, &ast).unwrap();
     let json = serde_json::to_string(&byte_codes).unwrap();
     println!("Serilized json = {}", json);
@@ -274,7 +274,7 @@ x -= 1;
     rhai_bytecode::run_byte_codes(
         &executer,
         &byte_codes_restored,
-        variable_names.len(),
+        variable_count as usize,
         &vec![],
     )
     .unwrap();
