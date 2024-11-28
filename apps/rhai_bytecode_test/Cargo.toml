@@ -7,3 +7,6 @@ edition = "2021"
 anyhow = {version="1"}
 serde_json = {version="1"}
 rhai_bytecode = { path = "../../crates/rhai_bytecode" }
+
+[profile.release]
+strip = true

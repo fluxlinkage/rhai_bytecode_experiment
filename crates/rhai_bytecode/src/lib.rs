@@ -57,19 +57,18 @@ pub trait DynamicValue: Sized + Clone {
     fn from_string(v: &String) -> anyhow::Result<Self> {
         return Self::from_dynamic(rhai::Dynamic::from(v.clone()));
     }
-    fn from_variable_ref(var_id: OpSize) -> anyhow::Result<Self>;
-    fn from_variable_element_ref(var_id: OpSize, indexes: Vec<OpSize>) -> anyhow::Result<Self>;
-    fn is_unit(&self, variables: &Vec<Self>) -> anyhow::Result<bool>;
-    fn to_bool(&self, variables: &Vec<Self>) -> anyhow::Result<bool>;
-    fn to_size(&self, variables: &Vec<Self>) -> anyhow::Result<OpSize>;
-    fn deref<'a>(&'a self, variables: &'a Vec<Self>) -> anyhow::Result<&'a Self>;
-    fn deref_mut<'a>(&self, variables: &'a mut Vec<Self>) -> anyhow::Result<&'a mut Self>;
-    fn ref_append_index(&mut self, ind: OpSize) -> anyhow::Result<()>;
+    fn from_variable_ref(var:std::rc::Rc<std::cell::RefCell<Self>>) -> anyhow::Result<Self>;
+    fn is_unit(&self) -> anyhow::Result<bool>;
+    fn to_bool(&self) -> anyhow::Result<bool>;
+    fn to_size(&self) -> anyhow::Result<OpSize>;
+    fn get_value(&self) -> anyhow::Result<Self>;
+    fn set_value(&self,val:Self) -> anyhow::Result<()>;
+    fn enter_index(&mut self, ind: OpSize) -> anyhow::Result<()>;
 }
 
 pub struct Executer<T: DynamicValue> {
     fn_names: Vec<String>,
-    fns: Vec<Box<dyn Fn(Vec<T>, &mut Vec<T>) -> anyhow::Result<T>>>,
+    fns: Vec<Box<dyn Fn(&Vec<T>) -> anyhow::Result<T>>>,
 }
 
 impl<T: DynamicValue> Executer<T> {
@@ -82,25 +81,26 @@ impl<T: DynamicValue> Executer<T> {
     fn function_names(&self) -> &Vec<String> {
         return &self.fn_names;
     }
-    pub fn add_fn(
+    pub fn add_fn<F:Fn(&Vec<T>) -> anyhow::Result<T>+'static>(
         &mut self,
-        name: String,
-        func: Box<dyn Fn(Vec<T>, &mut Vec<T>) -> anyhow::Result<T>>,
+        name: impl ToString,
+        func: F,
     ) -> anyhow::Result<()> {
-        if self.fn_names.contains(&name) {
-            anyhow::bail!("Function \"{}\" already exists!", name);
+        let name_string = name.to_string();
+        if self.fn_names.contains(&name_string) {
+            anyhow::bail!("Function \"{}\" already exists!", name_string);
         } else {
-            self.fns.push(func);
-            self.fn_names.push(name);
+            self.fns.push(Box::new(func));
+            self.fn_names.push(name_string);
             return Ok(());
         }
     }
-    fn call_fn(&self, index: OpSize, args: Vec<T>, variables: &mut Vec<T>) -> anyhow::Result<T> {
+    fn call_fn(&self, index: OpSize, args: &Vec<T>) -> anyhow::Result<T> {
         let ind = index as usize;
         if ind >= self.fns.len() {
             anyhow::bail!("Function #{} does not exist!", index);
         } else {
-            return self.fns[ind](args, variables);
+            return self.fns[ind](args);
         }
     }
 }
@@ -656,9 +656,13 @@ pub fn run_byte_codes<T: DynamicValue>(
     var_count: usize,
     init_vars: &Vec<T>,
 ) -> anyhow::Result<T> {
-    let mut variables = vec![T::from_unit()?; var_count];
-    for i in 0..usize::min(var_count, init_vars.len()) {
-        variables[i] = init_vars[i].clone();
+    let mut variables=Vec::<std::rc::Rc<std::cell::RefCell<T>>>::with_capacity(var_count);
+    let init_len=usize::min(var_count, init_vars.len());
+    for i in 0..init_len {
+        variables.push(std::rc::Rc::new(std::cell::RefCell::<T>::new(init_vars[i].clone())));
+    }
+    for _i in init_len..var_count {
+        variables.push(std::rc::Rc::new(std::cell::RefCell::<T>::new(T::from_unit()?)));
     }
     let mut variable_stack = Vec::<T>::new();
     let mut pos = 0usize;
@@ -703,7 +707,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                 // variable_stack.push(T::from_dynamic(rhai::Dynamic::from_array(arr))?);
             }
             ByteCode::Variable(var_id) => {
-                variable_stack.push(T::from_variable_ref(*var_id)?);
+                variable_stack.push(T::from_variable_ref(variables[*var_id as usize].clone())?);
             }
             ByteCode::FnCall(fn_index, fn_arg_count) => {
                 let fn_arg_count_sz = *fn_arg_count as usize;
@@ -711,7 +715,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for function call!");
                 }
                 let args = variable_stack.split_off(variable_stack.len() - fn_arg_count_sz);
-                let res = executer.call_fn(*fn_index, args, &mut variables)?;
+                let res = executer.call_fn(*fn_index, &args)?;
                 variable_stack.push(res);
             }
             ByteCode::Jump(p) => {
@@ -720,7 +724,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             }
             ByteCode::JumpIfTrue(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if val.to_bool(&variables)? {
+                    if val.to_bool()? {
                         pos = *p as usize;
                         continue;
                     }
@@ -731,7 +735,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             },
             ByteCode::JumpIfFalse(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if !val.to_bool(&variables)? {
+                    if !val.to_bool()? {
                         pos = *p as usize;
                         continue;
                     }
@@ -742,7 +746,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             },
             ByteCode::JumpIfNotNull(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if !val.is_unit(&variables)? {
+                    if !val.is_unit()? {
                         pos = *p as usize;
                         continue;
                     }
@@ -753,7 +757,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             },
             ByteCode::VarInit(var_id) => match variable_stack.last() {
                 Some(val) => {
-                    variables[*var_id as usize] = val.clone();
+                    *(variables[*var_id as usize].try_borrow_mut()?)=val.get_value()?.clone();
                 }
                 None => {
                     anyhow::bail!("Not enough arguments for variable declare!");
@@ -762,7 +766,7 @@ pub fn run_byte_codes<T: DynamicValue>(
             ByteCode::Index => match variable_stack.pop() {
                 Some(ind) => match variable_stack.last_mut() {
                     Some(r) => {
-                        r.ref_append_index(ind.to_size(&variables)?)?;
+                        r.enter_index(ind.to_size()?)?;
                     }
                     None => {
                         anyhow::bail!("Not enough arguments for index!");
@@ -788,7 +792,7 @@ pub fn run_byte_codes<T: DynamicValue>(
     }
     //println!("Stack size: {}",variable_stack.len());
     match variable_stack.pop() {
-        Some(value) => return Ok(value),
+        Some(value) => return value.get_value(),
         None => {
             return T::from_unit();
         }
