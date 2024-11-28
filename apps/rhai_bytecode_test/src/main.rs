@@ -25,6 +25,10 @@ fn new_array_for_rhai_bytecode(args: &Vec<SimpleDynamicValue>) -> anyhow::Result
 }
 
 fn main() {
+    // let script = "let x = 10_000_000;
+    // while x > 0 {
+    //     x -= 1;
+    // }";
     let script = "//! This script uses the Sieve of Eratosthenes to calculate prime numbers.
     const MAX_NUMBER_TO_CHECK = 1_000_000;
     let prime_mask = new_array(MAX_NUMBER_TO_CHECK + 1, true);
@@ -52,7 +56,8 @@ fn main() {
     let (byte_codes, variable_count) =
         rhai_bytecode::ast_to_byte_codes(&executer, &mut variable_names, &ast).unwrap();
     let json = serde_json::to_string(&byte_codes).unwrap();
-    println!("Serilized json = {}", json);
+    println!("Serilized JSON = {}", json);
+    println!("JSON length = {} ({}% of original script)", json.len(),json.len()*100/script.len());
     let byte_codes_restored = serde_json::from_str::<Vec<rhai_bytecode::ByteCode>>(&json).unwrap();
     let now = std::time::Instant::now();
     let res_byte_code = rhai_bytecode::run_byte_codes(
@@ -62,19 +67,22 @@ fn main() {
         &vec![],
     )
     .unwrap();
+    let time_byte_code=now.elapsed().as_secs_f64();
     println!(
-        "Finished (ByteCode). Run time = {} seconds.",
-        now.elapsed().as_secs_f64()
+        "Finished (Bytecode). Run time = {} seconds.",
+        time_byte_code
     );
-    println!("Result (ByteCode) = {:?}", res_byte_code);
+    println!("Result (Bytecode) = {:?}", res_byte_code);
     let now = std::time::Instant::now();
     let res_ast = engine
         .eval_ast::<rhai_bytecode::rhai::Dynamic>(&ast)
         .unwrap();
+    let time_ast=now.elapsed().as_secs_f64();
     println!(
         "Finished (AST). Run time = {} seconds.",
-        now.elapsed().as_secs_f64()
+        time_ast
     );
     println!("Result (AST) = {:?}", res_ast);
     // Should be 78498.
+    println!("Bytecode timecost = {}% of AST", (time_byte_code*100.0/time_ast+0.5) as i32);
 }

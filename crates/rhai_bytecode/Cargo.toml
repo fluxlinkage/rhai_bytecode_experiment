@@ -9,10 +9,18 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 anyhow = {version="1"}
 serde = { version = "1", features = ["derive"] }
-rhai={version="1.2",features=["sync","no_object","no_time","no_function","no_module","no_custom_syntax","no_position","internals","unicode-xid-ident","serde"]}
+rhai={version="1.2",features=["internals","serde"]}
 
 [features]
-default = ["size32"]
+default = ["size32","no_object","no_time","no_function","no_module","no_custom_syntax","no_position"]
+no_object = ["rhai/no_object"]
+no_time = ["rhai/no_time"]
+no_function = ["rhai/no_function"]
+no_module = ["rhai/no_module"]
+no_custom_syntax = ["rhai/no_custom_syntax"]
+no_position = ["rhai/no_position"]
+unicode-xid-ident=["rhai/unicode-xid-ident"]
+sync = ["rhai/sync"]
 size16=[]
 size32=[]
 size64=[]

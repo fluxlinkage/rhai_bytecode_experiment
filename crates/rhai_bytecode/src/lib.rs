@@ -1,8 +1,9 @@
 pub use rhai;
 use rhai::{Expr, Stmt};
 
-static COMPILE_ENGINE: std::sync::LazyLock<rhai::Engine> =
-    std::sync::LazyLock::new(|| rhai::Engine::new_raw());
+thread_local! {
+    static COMPILE_ENGINE: std::cell::RefCell<rhai::Engine> = std::cell::RefCell::new(rhai::Engine::new_raw());
+}
 
 #[cfg(feature = "size16")]
 pub type OpSize = u16;
@@ -666,7 +667,7 @@ pub fn script_to_byte_codes<T: DynamicValue>(
     initial_variables: &mut Vec<String>,
     script: &str,
 ) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
-    let ast = COMPILE_ENGINE.compile(script)?;
+    let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile(script))?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
 
@@ -675,7 +676,7 @@ pub fn script_to_byte_codes_expression<T: DynamicValue>(
     initial_variables: &mut Vec<String>,
     script: &str,
 ) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
-    let ast = COMPILE_ENGINE.compile_expression(script)?;
+    let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile_expression(script))?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
 
@@ -684,7 +685,7 @@ pub fn script_to_byte_codes_expression_no_new_variables<T: DynamicValue>(
     initial_variables: &mut Vec<String>,
     script: &str,
 ) -> anyhow::Result<(Vec<ByteCode>,OpSize)> {
-    let ast = COMPILE_ENGINE.compile_expression(script)?;
+    let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile_expression(script))?;
     let init_len = initial_variables.len();
     let res = ast_to_byte_codes(executer, initial_variables, &ast)?;
     if initial_variables.len() != init_len {
