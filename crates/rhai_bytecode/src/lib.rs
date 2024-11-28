@@ -14,27 +14,72 @@ pub type OpSize = u64;
 pub type INT = rhai::INT;
 pub type FLOAT = rhai::FLOAT;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum ByteCode {
-    DynamicConstant(rhai::Dynamic),
-    UnitConstant,
-    BoolConstant(bool),
-    IntegerConstant(INT),
-    FloatConstant(FLOAT),
-    CharConstant(char),
-    StringConstant(String),
-    InterpolatedString(OpSize),
-    ConstructArray(OpSize),
-    Variable(OpSize),
-    FnCall(OpSize, OpSize),
-    Jump(OpSize),
-    JumpIfTrue(OpSize),
-    JumpIfFalse(OpSize),
-    JumpIfNotNull(OpSize),
-    VarInit(OpSize),
-    Index,
-    Return,
-    PopStack,
+    /// DynamicConstant
+    DC(rhai::Dynamic),
+    /// UnitConstant
+    UC,
+    /// BoolConstant
+    BC(bool),
+    /// IntegerConstant
+    IC(INT),
+    /// FloatConstant
+    FC(FLOAT),
+    /// CharConstant
+    CC(char),
+    /// StringConstant
+    SC(String),
+    /// InterpolatedString
+    IS(OpSize),
+    /// ConstructArray
+    CA(OpSize),
+    /// Variable
+    V(OpSize),
+    /// FnCall
+    F(OpSize, OpSize),
+    /// Jump
+    J(OpSize),
+    /// JumpIfTrue
+    JT(OpSize),
+    /// JumpIfFalse
+    JF(OpSize),
+    /// JumpIfNotNull
+    JNN(OpSize),
+    /// VarInit
+    VI(OpSize),
+    /// Index
+    I,
+    /// Return
+    R,
+    /// PopStack
+    P,
+}
+
+impl std::fmt::Debug for ByteCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DC(arg0) => f.debug_tuple("DynamicConstant").field(arg0).finish(),
+            Self::UC => write!(f, "UnitConstant"),
+            Self::BC(arg0) => f.debug_tuple("BoolConstant").field(arg0).finish(),
+            Self::IC(arg0) => f.debug_tuple("IntegerConstant").field(arg0).finish(),
+            Self::FC(arg0) => f.debug_tuple("FloatConstant").field(arg0).finish(),
+            Self::CC(arg0) => f.debug_tuple("CharConstant").field(arg0).finish(),
+            Self::SC(arg0) => f.debug_tuple("StringConstant").field(arg0).finish(),
+            Self::IS(arg0) => f.debug_tuple("InterpolatedString").field(arg0).finish(),
+            Self::CA(arg0) => f.debug_tuple("ConstructArray").field(arg0).finish(),
+            Self::V(arg0) => f.debug_tuple("Variable").field(arg0).finish(),
+            Self::F(arg0, arg1) => f.debug_tuple("FnCall").field(arg0).field(arg1).finish(),
+            Self::J(arg0) => f.debug_tuple("Jump").field(arg0).finish(),
+            Self::JT(arg0) => f.debug_tuple("JumpIfTrue").field(arg0).finish(),
+            Self::JF(arg0) => f.debug_tuple("JumpIfFalse").field(arg0).finish(),
+            Self::JNN(arg0) => f.debug_tuple("JumpIfNotNull").field(arg0).finish(),
+            Self::VI(arg0) => f.debug_tuple("VarInit").field(arg0).finish(),
+            Self::I => write!(f, "Index"),
+            Self::R => write!(f, "Return"),
+            Self::P => write!(f, "PopStack"),
+        }
+    }
 }
 
 pub trait DynamicValue: Sized + Clone {
@@ -141,22 +186,22 @@ fn append_expr(
 ) -> anyhow::Result<()> {
     match expr {
         Expr::DynamicConstant(dynamic, _) => {
-            byte_codes.push(ByteCode::DynamicConstant(*dynamic.clone()));
+            byte_codes.push(ByteCode::DC(*dynamic.clone()));
         }
         Expr::BoolConstant(v, _) => {
-            byte_codes.push(ByteCode::BoolConstant(*v));
+            byte_codes.push(ByteCode::BC(*v));
         }
         Expr::IntegerConstant(v, _) => {
-            byte_codes.push(ByteCode::IntegerConstant(*v));
+            byte_codes.push(ByteCode::IC(*v));
         }
         Expr::FloatConstant(float_wrapper, _) => {
-            byte_codes.push(ByteCode::FloatConstant(*float_wrapper.as_ref()));
+            byte_codes.push(ByteCode::FC(*float_wrapper.as_ref()));
         }
         Expr::CharConstant(v, _) => {
-            byte_codes.push(ByteCode::CharConstant(*v));
+            byte_codes.push(ByteCode::CC(*v));
         }
         Expr::StringConstant(immutable_string, _) => {
-            byte_codes.push(ByteCode::StringConstant(immutable_string.to_string()));
+            byte_codes.push(ByteCode::SC(immutable_string.to_string()));
         }
         Expr::InterpolatedString(thin_vec, _) => {
             for expr in thin_vec {
@@ -170,7 +215,7 @@ fn append_expr(
                     expr,
                 )?;
             }
-            byte_codes.push(ByteCode::InterpolatedString(thin_vec.len() as OpSize));
+            byte_codes.push(ByteCode::IS(thin_vec.len() as OpSize));
         }
         Expr::Array(thin_vec, _) => {
             for sub_expr in thin_vec {
@@ -189,11 +234,11 @@ fn append_expr(
             anyhow::bail!("Map not supported yet!");
         }
         Expr::Unit(..) => {
-            byte_codes.push(ByteCode::UnitConstant);
+            byte_codes.push(ByteCode::UC);
         }
         Expr::Variable(data, _, _) => {
             let var_id = find_index(variables, data.1.as_str(), "variable")?;
-            byte_codes.push(ByteCode::Variable(var_id));
+            byte_codes.push(ByteCode::V(var_id));
         }
         Expr::ThisPtr(..) => {
             anyhow::bail!("\"this\" pointer not supported yet!");
@@ -230,7 +275,7 @@ fn append_expr(
                 )?;
             }
             let fn_id = find_index(functions, fn_call_expr.name.as_str(), "function")?;
-            byte_codes.push(ByteCode::FnCall(fn_id, fn_call_expr.args.len() as OpSize));
+            byte_codes.push(ByteCode::F(fn_id, fn_call_expr.args.len() as OpSize));
         }
         Expr::Dot(..) => {
             anyhow::bail!("Dot operator (.) not supported yet!");
@@ -257,7 +302,7 @@ fn append_expr(
                 byte_codes,
                 &binary_expr.rhs,
             )?;
-            byte_codes.push(ByteCode::Index);
+            byte_codes.push(ByteCode::I);
         }
         Expr::And(binary_expr, _) => {
             append_expr(
@@ -270,7 +315,7 @@ fn append_expr(
                 &binary_expr.lhs,
             )?;
             let pos = byte_codes.len();
-            byte_codes.push(ByteCode::JumpIfFalse(0));
+            byte_codes.push(ByteCode::JF(0));
             append_expr(
                 functions,
                 variables,
@@ -280,7 +325,7 @@ fn append_expr(
                 byte_codes,
                 &binary_expr.rhs,
             )?;
-            byte_codes[pos] = ByteCode::JumpIfFalse(byte_codes.len() as OpSize);
+            byte_codes[pos] = ByteCode::JF(byte_codes.len() as OpSize);
         }
         Expr::Or(binary_expr, _) => {
             append_expr(
@@ -293,7 +338,7 @@ fn append_expr(
                 &binary_expr.lhs,
             )?;
             let pos = byte_codes.len();
-            byte_codes.push(ByteCode::JumpIfTrue(0));
+            byte_codes.push(ByteCode::JT(0));
             append_expr(
                 functions,
                 variables,
@@ -303,7 +348,7 @@ fn append_expr(
                 byte_codes,
                 &binary_expr.rhs,
             )?;
-            byte_codes[pos] = ByteCode::JumpIfTrue(byte_codes.len() as OpSize);
+            byte_codes[pos] = ByteCode::JT(byte_codes.len() as OpSize);
         }
         Expr::Coalesce(binary_expr, _) => {
             append_expr(
@@ -316,7 +361,7 @@ fn append_expr(
                 &binary_expr.lhs,
             )?;
             let pos = byte_codes.len();
-            byte_codes.push(ByteCode::JumpIfNotNull(0));
+            byte_codes.push(ByteCode::JNN(0));
             append_expr(
                 functions,
                 variables,
@@ -326,7 +371,7 @@ fn append_expr(
                 byte_codes,
                 &binary_expr.rhs,
             )?;
-            byte_codes[pos] = ByteCode::JumpIfNotNull(byte_codes.len() as OpSize);
+            byte_codes[pos] = ByteCode::JNN(byte_codes.len() as OpSize);
         }
         // Expr::Custom(..) => {
         //     anyhow::bail!("Custom syntax not supported yet!");
@@ -362,7 +407,7 @@ fn append_stmt(
                 &flow_control.expr,
             )?;
             let jz_pos = byte_codes.len();
-            byte_codes.push(ByteCode::JumpIfFalse(0));
+            byte_codes.push(ByteCode::JF(0));
             let var_len=variables.len();
             for sub_stmt in &flow_control.body {
                 append_stmt(
@@ -377,8 +422,8 @@ fn append_stmt(
             }
             variables.truncate(var_len);
             let jmp_pos = byte_codes.len();
-            byte_codes.push(ByteCode::Jump(0));
-            byte_codes[jz_pos] = ByteCode::JumpIfFalse(byte_codes.len() as OpSize);
+            byte_codes.push(ByteCode::J(0));
+            byte_codes[jz_pos] = ByteCode::JF(byte_codes.len() as OpSize);
             let var_len=variables.len();
             for sub_stmt in &flow_control.branch {
                 append_stmt(
@@ -392,7 +437,7 @@ fn append_stmt(
                 )?;
             }
             variables.truncate(var_len);
-            byte_codes[jmp_pos] = ByteCode::Jump(byte_codes.len() as OpSize);
+            byte_codes[jmp_pos] = ByteCode::J(byte_codes.len() as OpSize);
         }
         Stmt::Switch(..) => {
             anyhow::bail!("\"switch\" not supported yet!");
@@ -411,7 +456,7 @@ fn append_stmt(
                         byte_codes,
                         &flow_control.expr,
                     )?;
-                    byte_codes.push(ByteCode::JumpIfFalse(0));
+                    byte_codes.push(ByteCode::JF(0));
                     byte_codes.len() - 1
                 }
             };
@@ -430,16 +475,16 @@ fn append_stmt(
                 )?;
             }
             variables.truncate(var_len);
-            byte_codes.push(ByteCode::Jump(start_pos as OpSize));
+            byte_codes.push(ByteCode::J(start_pos as OpSize));
             let end_pos = byte_codes.len();
             for pos_break in &new_break_pos {
-                byte_codes[*pos_break] = ByteCode::Jump(end_pos as OpSize);
+                byte_codes[*pos_break] = ByteCode::J(end_pos as OpSize);
             }
             for pos_continue in &new_continue_pos {
-                byte_codes[*pos_continue] = ByteCode::Jump(start_pos as OpSize);
+                byte_codes[*pos_continue] = ByteCode::J(start_pos as OpSize);
             }
             if jz_pos != usize::MAX {
-                byte_codes[jz_pos] = ByteCode::JumpIfFalse(end_pos as OpSize);
+                byte_codes[jz_pos] = ByteCode::JF(end_pos as OpSize);
             }
         }
         Stmt::Do(..) => {
@@ -462,8 +507,8 @@ fn append_stmt(
             if var_id+1>*max_variable_count {
                 *max_variable_count=var_id+1;
             }
-            byte_codes.push(ByteCode::VarInit(var_id));
-            byte_codes.push(ByteCode::PopStack);
+            byte_codes.push(ByteCode::VI(var_id));
+            byte_codes.push(ByteCode::P);
         }
         Stmt::Assignment(data) => {
             append_expr(
@@ -489,8 +534,8 @@ fn append_stmt(
                 None => "=",
             };
             let op_id = find_index(functions, op_str, "assignment operator")?;
-            byte_codes.push(ByteCode::FnCall(op_id, 2));
-            byte_codes.push(ByteCode::PopStack);
+            byte_codes.push(ByteCode::F(op_id, 2));
+            byte_codes.push(ByteCode::P);
         }
         Stmt::FnCall(fn_call_expr, _) => {
             for sub_expr in &fn_call_expr.args {
@@ -505,8 +550,8 @@ fn append_stmt(
                 )?;
             }
             let fn_id = find_index(functions, fn_call_expr.name.as_str(), "function")?;
-            byte_codes.push(ByteCode::FnCall(fn_id, fn_call_expr.args.len() as OpSize));
-            byte_codes.push(ByteCode::PopStack);
+            byte_codes.push(ByteCode::F(fn_id, fn_call_expr.args.len() as OpSize));
+            byte_codes.push(ByteCode::P);
         }
         Stmt::Block(stmt_block) => {
             let var_len=variables.len();
@@ -545,7 +590,7 @@ fn append_stmt(
                 //continue
                 continue_pos.push(byte_codes.len());
             }
-            byte_codes.push(ByteCode::Jump(0));
+            byte_codes.push(ByteCode::J(0));
         }
         Stmt::Return(expr, astflags, _) => {
             if (*astflags & rhai::ASTFlags::BREAK) == rhai::ASTFlags::BREAK {
@@ -564,10 +609,10 @@ fn append_stmt(
                         )?;
                     }
                     None => {
-                        byte_codes.push(ByteCode::UnitConstant);
+                        byte_codes.push(ByteCode::UC);
                     }
                 }
-                byte_codes.push(ByteCode::Return);
+                byte_codes.push(ByteCode::R);
             }
         }
         // Stmt::Import(..) => todo!(),
@@ -606,7 +651,7 @@ pub fn ast_to_byte_codes<T: DynamicValue>(
     }
     match byte_codes.last() {
         Some(code) => match code {
-            ByteCode::PopStack => {
+            ByteCode::P => {
                 byte_codes.pop();
             }
             _ => {}
@@ -669,31 +714,31 @@ pub fn run_byte_codes<T: DynamicValue>(
     while pos < byte_codes.len() {
         //println!("{}: {:?}", pos, byte_codes[pos]);
         match &byte_codes[pos] {
-            ByteCode::DynamicConstant(dynamic) => {
+            ByteCode::DC(dynamic) => {
                 variable_stack.push(T::from_dynamic(dynamic.clone())?);
             }
-            ByteCode::UnitConstant => {
+            ByteCode::UC => {
                 variable_stack.push(T::from_unit()?);
             }
-            ByteCode::BoolConstant(v) => {
+            ByteCode::BC(v) => {
                 variable_stack.push(T::from_bool(*v)?);
             }
-            ByteCode::IntegerConstant(v) => {
+            ByteCode::IC(v) => {
                 variable_stack.push(T::from_integer(*v)?);
             }
-            ByteCode::FloatConstant(v) => {
+            ByteCode::FC(v) => {
                 variable_stack.push(T::from_float(*v)?);
             }
-            ByteCode::CharConstant(v) => {
+            ByteCode::CC(v) => {
                 variable_stack.push(T::from_char(*v)?);
             }
-            ByteCode::StringConstant(v) => {
+            ByteCode::SC(v) => {
                 variable_stack.push(T::from_string(v)?);
             }
-            ByteCode::InterpolatedString(_) => {
+            ByteCode::IS(_) => {
                 anyhow::bail!("InterpolatedString not supported yet!");
             }
-            ByteCode::ConstructArray(_) => {
+            ByteCode::CA(_) => {
                 anyhow::bail!("ConstructArray not supported yet!");
                 // let mut arr = Vec::<rhai::Dynamic>::with_capacity(*l as usize);
                 // if variable_stack.len() < *l as usize {
@@ -706,10 +751,10 @@ pub fn run_byte_codes<T: DynamicValue>(
                 // variable_stack.truncate(start_position);
                 // variable_stack.push(T::from_dynamic(rhai::Dynamic::from_array(arr))?);
             }
-            ByteCode::Variable(var_id) => {
+            ByteCode::V(var_id) => {
                 variable_stack.push(T::from_variable_ref(variables[*var_id as usize].clone())?);
             }
-            ByteCode::FnCall(fn_index, fn_arg_count) => {
+            ByteCode::F(fn_index, fn_arg_count) => {
                 let fn_arg_count_sz = *fn_arg_count as usize;
                 if variable_stack.len() < fn_arg_count_sz {
                     anyhow::bail!("Not enough arguments for function call!");
@@ -718,11 +763,11 @@ pub fn run_byte_codes<T: DynamicValue>(
                 let res = executer.call_fn(*fn_index, &args)?;
                 variable_stack.push(res);
             }
-            ByteCode::Jump(p) => {
+            ByteCode::J(p) => {
                 pos = *p as usize;
                 continue;
             }
-            ByteCode::JumpIfTrue(p) => match variable_stack.pop() {
+            ByteCode::JT(p) => match variable_stack.pop() {
                 Some(val) => {
                     if val.to_bool()? {
                         pos = *p as usize;
@@ -733,7 +778,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for conditional jump!");
                 }
             },
-            ByteCode::JumpIfFalse(p) => match variable_stack.pop() {
+            ByteCode::JF(p) => match variable_stack.pop() {
                 Some(val) => {
                     if !val.to_bool()? {
                         pos = *p as usize;
@@ -744,7 +789,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for conditional jump!");
                 }
             },
-            ByteCode::JumpIfNotNull(p) => match variable_stack.pop() {
+            ByteCode::JNN(p) => match variable_stack.pop() {
                 Some(val) => {
                     if !val.is_unit()? {
                         pos = *p as usize;
@@ -755,7 +800,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for conditional jump!");
                 }
             },
-            ByteCode::VarInit(var_id) => match variable_stack.last() {
+            ByteCode::VI(var_id) => match variable_stack.last() {
                 Some(val) => {
                     *(variables[*var_id as usize].try_borrow_mut()?)=val.get_value()?.clone();
                 }
@@ -763,7 +808,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for variable declare!");
                 }
             },
-            ByteCode::Index => match variable_stack.pop() {
+            ByteCode::I => match variable_stack.pop() {
                 Some(ind) => match variable_stack.last_mut() {
                     Some(r) => {
                         r.enter_index(ind.to_size()?)?;
@@ -776,7 +821,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Not enough arguments for index!");
                 }
             },
-            ByteCode::Return => match variable_stack.pop() {
+            ByteCode::R => match variable_stack.pop() {
                 Some(value) => {
                     return Ok(value);
                 }
@@ -784,7 +829,7 @@ pub fn run_byte_codes<T: DynamicValue>(
                     anyhow::bail!("Missing return value!");
                 }
             },
-            ByteCode::PopStack => {
+            ByteCode::P => {
                 variable_stack.pop();
             }
         }
