@@ -25,6 +25,12 @@ fn new_array_for_rhai_bytecode(args: &Vec<SimpleDynamicValue>) -> anyhow::Result
 }
 
 fn main() {
+    // let a = std::thread::spawn(|| {
+    //     let b=rhai_bytecode::ByteCode::UC;
+    //     b
+    // });
+    // let script = "let ary = [1,2,3];
+    // ary[1]";
     // let script = "let x = 10_000_000;
     // while x > 0 {
     //     x -= 1;
@@ -53,8 +59,7 @@ fn main() {
     let mut executer = sample::new_executer().unwrap();
     executer.add_fn("new_array", new_array_for_rhai_bytecode).unwrap();
     let mut variable_names = Vec::<String>::new();
-    let (byte_codes, variable_count) =
-        rhai_bytecode::ast_to_byte_codes(&executer, &mut variable_names, &ast).unwrap();
+    let byte_codes= rhai_bytecode::ast_to_byte_codes(&executer, &mut variable_names, &ast).unwrap();
     let json = serde_json::to_string(&byte_codes).unwrap();
     println!("Serilized JSON = {}", json);
     println!("JSON length = {} ({}% of original script)", json.len(),json.len()*100/script.len());
@@ -63,7 +68,6 @@ fn main() {
     let res_byte_code = rhai_bytecode::run_byte_codes(
         &executer,
         &byte_codes_restored,
-        variable_count as usize,
         &vec![],
     )
     .unwrap();
