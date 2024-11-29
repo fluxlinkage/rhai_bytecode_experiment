@@ -13,60 +13,22 @@ pub(crate) enum SimpleDynamicValue {
 }
 
 impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
-    fn from_dynamic(dynamic: rhai_bytecode::rhai::Dynamic) -> anyhow::Result<Self> {
-        if dynamic.is_unit() {
-            return Self::from_unit();
-        } else if dynamic.is_bool() {
-            match dynamic.as_bool() {
-                Ok(v) => {
-                    return Self::from_bool(v);
-                }
-                Err(_) => {
-                    anyhow::bail!("Failed to convert Dynamic to bool!");
-                }
-            }
-        } else if dynamic.is_char() {
-            match dynamic.as_char() {
-                Ok(v) => {
-                    return Self::from_char(v);
-                }
-                Err(_) => {
-                    anyhow::bail!("Failed to convert Dynamic to char!");
-                }
-            }
-        } else if dynamic.is_int() {
-            match dynamic.as_int() {
-                Ok(v) => {
-                    return Self::from_integer(v);
-                }
-                Err(_) => {
-                    anyhow::bail!("Failed to convert Dynamic to int!");
-                }
-            }
-        } else if dynamic.is_float() {
-            match dynamic.as_float() {
-                Ok(v) => {
-                    return Self::from_float(v);
-                }
-                Err(_) => {
-                    anyhow::bail!("Failed to convert Dynamic to float!");
-                }
-            }
-        } else if dynamic.is_array() {
-            match dynamic.as_array_ref() {
-                Ok(ary) => {
-                    let mut vec=Vec::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(ary.len());
+    fn from_dynamic(dynamic: rhai_bytecode::DynamicBasicValue) -> anyhow::Result<Self> {
+        match dynamic {
+            rhai_bytecode::DynamicBasicValue::Unit =>{return Self::from_unit();}
+            rhai_bytecode::DynamicBasicValue::Bool(v) => {return Self::from_bool(v);},
+            rhai_bytecode::DynamicBasicValue::Char(v) => {return Self::from_char(v);},
+            rhai_bytecode::DynamicBasicValue::Integer(v) => {return Self::from_integer(v);},
+            rhai_bytecode::DynamicBasicValue::Float(v) => {return Self::from_float(v);},
+            rhai_bytecode::DynamicBasicValue::Array(ary) => {
+                let mut vec=Vec::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(ary.len());
                     for item in ary.iter() {
                         vec.push(std::rc::Rc::new(std::cell::RefCell::new(Self::from_dynamic(item.clone())?)));
                     }
                     return Ok(SimpleDynamicValue::Array(vec));
-                }
-                Err(_) => {
-                    anyhow::bail!("Failed to convert Dynamic to array!");
-                }
             }
+            _ => {anyhow::bail!("Unsupported type for \"{:?}\"!", dynamic);},
         }
-        anyhow::bail!("Unsupported type: {}", dynamic.type_name());
     }
     
     fn from_variable_ref(var:std::rc::Rc<std::cell::RefCell<Self>>) -> anyhow::Result<Self> {

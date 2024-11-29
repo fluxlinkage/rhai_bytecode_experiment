@@ -15,10 +15,90 @@ pub type OpSize = u64;
 pub type INT = rhai::INT;
 pub type FLOAT = rhai::FLOAT;
 
+#[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
+//#[serde(untagged)]
+pub enum DynamicBasicValue {
+    #[serde(rename="U")]
+    Unit,
+    #[serde(rename="B")]
+    Bool(bool),
+    #[serde(rename="I")]
+    Integer(INT),
+    #[serde(rename="F")]
+    Float(FLOAT),
+    #[serde(rename="C")]
+    Char(char),
+    #[serde(rename="S")]
+    String(String),
+    #[serde(rename="A")]
+    Array(Vec<DynamicBasicValue>),
+}
+
+impl DynamicBasicValue {
+    fn from_dynamic(dynamic: &rhai::Dynamic) -> anyhow::Result<Self> {
+        if dynamic.is_unit() {
+            return Ok(Self::Unit);
+        } else if dynamic.is_bool() {
+            match dynamic.as_bool() {
+                Ok(v) => {
+                    return Ok(Self::Bool(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to bool!");
+                }
+            }
+        } else if dynamic.is_char() {
+            match dynamic.as_char() {
+                Ok(v) => {
+                    return Ok(Self::Char(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to char!");
+                }
+            }
+        } else if dynamic.is_int() {
+            match dynamic.as_int() {
+                Ok(v) => {
+                    return Ok(Self::Integer(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to int!");
+                }
+            }
+        } else if dynamic.is_float() {
+            match dynamic.as_float() {
+                Ok(v) => {
+                    return Ok(Self::Float(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to float!");
+                }
+            }
+        } else if dynamic.is_string() {
+           return Ok(Self::String(dynamic.to_string()));
+        }else if dynamic.is_array() {
+            match dynamic.as_array_ref() {
+                Ok(ary) => {
+                    let mut vec=Vec::<DynamicBasicValue>::with_capacity(ary.len());
+                    for item in ary.iter() {
+                        vec.push(Self::from_dynamic(item)?);
+                    }
+                    return Ok(Self::Array(vec));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to array!");
+                }
+            }
+        }else{
+            anyhow::bail!("Unsupported type \"{:?}\"!", dynamic.type_name());
+        }
+    }
+}
+
 #[derive(Debug,serde::Serialize, serde::Deserialize)]
 pub enum ByteCode {
     #[serde(rename="DC")]
-    DynamicConstant(rhai::Dynamic),
+    DynamicConstant(DynamicBasicValue),
     #[serde(rename="UC")]
     UnitConstant,
     #[serde(rename="BC")]
@@ -58,24 +138,24 @@ pub enum ByteCode {
 }
 
 pub trait DynamicValue: Sized + Clone {
-    fn from_dynamic(dynamic: rhai::Dynamic) -> anyhow::Result<Self>;
+    fn from_dynamic(dynamic: DynamicBasicValue) -> anyhow::Result<Self>;
     fn from_unit() -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::UNIT);
+        return Self::from_dynamic(DynamicBasicValue::Unit);
     }
     fn from_bool(v: bool) -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::from(v));
+        return Self::from_dynamic(DynamicBasicValue::Bool(v));
     }
     fn from_integer(v: INT) -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::from(v));
+        return Self::from_dynamic(DynamicBasicValue::Integer(v));
     }
     fn from_float(v: FLOAT) -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::from(v));
+        return Self::from_dynamic(DynamicBasicValue::Float(v));
     }
     fn from_char(v: char) -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::from(v));
+        return Self::from_dynamic(DynamicBasicValue::Char(v));
     }
     fn from_string(v: &String) -> anyhow::Result<Self> {
-        return Self::from_dynamic(rhai::Dynamic::from(v.clone()));
+        return Self::from_dynamic(DynamicBasicValue::String(v.clone()));
     }
     fn from_variable_ref(var:std::rc::Rc<std::cell::RefCell<Self>>) -> anyhow::Result<Self>;
     fn is_unit(&self) -> anyhow::Result<bool>;
@@ -148,7 +228,7 @@ fn append_expr(
 ) -> anyhow::Result<()> {
     match expr {
         Expr::DynamicConstant(dynamic, _) => {
-            byte_codes.push(ByteCode::DynamicConstant(*dynamic.clone()));
+            byte_codes.push(ByteCode::DynamicConstant(DynamicBasicValue::from_dynamic(dynamic)?));
         }
         Expr::BoolConstant(v, _) => {
             byte_codes.push(ByteCode::BoolConstant(*v));
