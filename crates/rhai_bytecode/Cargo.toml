@@ -10,9 +10,11 @@ crate-type = ["cdylib", "rlib"]
 anyhow = {version="1"}
 serde = { version = "1", features = ["derive"] }
 rhai={version="1.2",features=["internals"]}
+thin-vec = { version = "0.2", default-features = false, optional = true }
 
 [features]
 default = ["size32","no_object","no_time","no_function","no_module","no_custom_syntax","no_position"]
+thin-vec = ["dep:thin-vec","thin-vec/serde"]
 no_object = ["rhai/no_object"]
 no_time = ["rhai/no_time"]
 no_function = ["rhai/no_function"]

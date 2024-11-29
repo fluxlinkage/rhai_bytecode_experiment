@@ -8,7 +8,7 @@ pub(crate) enum SimpleDynamicValue {
     Bool(bool),
     Integer(rhai_bytecode::INT),
     Float(rhai_bytecode::FLOAT),
-    Array(Vec<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>),
+    Array(rhai_bytecode::VEC<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>),
     Reference(std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>)
 }
 
@@ -21,7 +21,7 @@ impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
             rhai_bytecode::DynamicBasicValue::Integer(v) => {return Self::from_integer(v);},
             rhai_bytecode::DynamicBasicValue::Float(v) => {return Self::from_float(v);},
             rhai_bytecode::DynamicBasicValue::Array(ary) => {
-                let mut vec=Vec::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(ary.len());
+                let mut vec=rhai_bytecode::VEC::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(ary.len());
                     for item in ary.iter() {
                         vec.push(std::rc::Rc::new(std::cell::RefCell::new(Self::from_dynamic(item.clone())?)));
                     }

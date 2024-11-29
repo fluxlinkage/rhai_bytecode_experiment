@@ -16,7 +16,7 @@ fn new_array_for_rhai_bytecode(args: &Vec<SimpleDynamicValue>) -> anyhow::Result
     }else{
         let l = args[0].get_value()?.to_size()? as usize;
         let v = args[1].get_value()?;
-        let mut vec=Vec::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(l);
+        let mut vec=rhai_bytecode::VEC::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(l);
         for _i in 0..l {
             vec.push(std::rc::Rc::new(std::cell::RefCell::new(v.clone())));
         }

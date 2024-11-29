@@ -14,6 +14,10 @@ pub type OpSize = u64;
 
 pub type INT = rhai::INT;
 pub type FLOAT = rhai::FLOAT;
+#[cfg(feature = "thin-vec")]
+pub type VEC<T> = thin_vec::ThinVec<T>;
+#[cfg(not(feature = "thin-vec"))]
+pub type VEC<T> = Vec<T>;
 
 #[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
 //#[serde(untagged)]
@@ -31,7 +35,7 @@ pub enum DynamicBasicValue {
     #[serde(rename="S")]
     String(String),
     #[serde(rename="A")]
-    Array(Vec<DynamicBasicValue>),
+    Array(VEC<DynamicBasicValue>)
 }
 
 impl DynamicBasicValue {
@@ -79,7 +83,7 @@ impl DynamicBasicValue {
         }else if dynamic.is_array() {
             match dynamic.as_array_ref() {
                 Ok(ary) => {
-                    let mut vec=Vec::<DynamicBasicValue>::with_capacity(ary.len());
+                    let mut vec=VEC::<DynamicBasicValue>::with_capacity(ary.len());
                     for item in ary.iter() {
                         vec.push(Self::from_dynamic(item)?);
                     }
