@@ -535,23 +535,27 @@ fn append_stmt<B:DynamicBasicValue>(
                 )?;
             }
             variables.truncate(var_len);
-            let jmp_pos = byte_codes.len();
-            byte_codes.push(ByteCode::Jump(0));
-            byte_codes[jz_pos] = ByteCode::JumpIfFalse(byte_codes.len() as SIZE);
-            let var_len=variables.len();
-            for sub_stmt in &flow_control.branch {
-                append_stmt(
-                    functions,
-                    variables,
-                    max_variable_count,
-                    break_pos,
-                    continue_pos,
-                    byte_codes,
-                    sub_stmt,
-                )?;
+            if flow_control.branch.is_empty() {
+                byte_codes[jz_pos] = ByteCode::JumpIfFalse(byte_codes.len() as SIZE);
+            }else{
+                let jmp_pos = byte_codes.len();
+                byte_codes.push(ByteCode::Jump(0));
+                byte_codes[jz_pos] = ByteCode::JumpIfFalse(byte_codes.len() as SIZE);
+                let var_len=variables.len();
+                for sub_stmt in &flow_control.branch {
+                    append_stmt(
+                        functions,
+                        variables,
+                        max_variable_count,
+                        break_pos,
+                        continue_pos,
+                        byte_codes,
+                        sub_stmt,
+                    )?;
+                }
+                variables.truncate(var_len);
+                byte_codes[jmp_pos] = ByteCode::Jump(byte_codes.len() as SIZE);
             }
-            variables.truncate(var_len);
-            byte_codes[jmp_pos] = ByteCode::Jump(byte_codes.len() as SIZE);
         }
         Stmt::Switch(..) => {
             anyhow::bail!("\"switch\" not supported yet!");
