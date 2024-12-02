@@ -1,715 +1,651 @@
-use std::ops::Deref;
+use rhai_bytecode::{self,DynamicBasicValue, DynamicValue};
 
-use rhai_bytecode::{self, DynamicValue};
-
-#[derive(Clone, Debug)]
-pub(crate) enum SimpleDynamicValue {
+/// Simple that only supports a subset of the types (bool, integer, float, array) that are supported by Rhai.
+#[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
+//#[serde(untagged)]
+pub(crate) enum SimpleBasicValue {
+    #[serde(rename="U")]
     Unit,
+    #[serde(rename="B")]
     Bool(bool),
+    #[serde(rename="I")]
     Integer(rhai_bytecode::INT),
+    #[serde(rename="F")]
     Float(rhai_bytecode::FLOAT),
-    Array(rhai_bytecode::VEC<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>),
-    Reference(std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>)
+    #[serde(rename="S")]
+    Array(rhai_bytecode::VEC<SimpleBasicValue>)
 }
 
-impl rhai_bytecode::DynamicValue for SimpleDynamicValue {
-    fn from_dynamic(dynamic: rhai_bytecode::DynamicBasicValue) -> anyhow::Result<Self> {
-        match dynamic {
-            rhai_bytecode::DynamicBasicValue::Unit =>{return Self::from_unit();}
-            rhai_bytecode::DynamicBasicValue::Bool(v) => {return Self::from_bool(v);},
-            rhai_bytecode::DynamicBasicValue::Char(v) => {return Self::from_char(v);},
-            rhai_bytecode::DynamicBasicValue::Integer(v) => {return Self::from_integer(v);},
-            rhai_bytecode::DynamicBasicValue::Float(v) => {return Self::from_float(v);},
-            rhai_bytecode::DynamicBasicValue::Array(ary) => {
-                let mut vec=rhai_bytecode::VEC::<std::rc::Rc<std::cell::RefCell<SimpleDynamicValue>>>::with_capacity(ary.len());
-                    for item in ary.iter() {
-                        vec.push(std::rc::Rc::new(std::cell::RefCell::new(Self::from_dynamic(item.clone())?)));
-                    }
-                    return Ok(SimpleDynamicValue::Array(vec));
+impl DynamicBasicValue for SimpleBasicValue {
+    fn from_dynamic(dynamic: &rhai_bytecode::rhai::Dynamic) -> anyhow::Result<Self> {
+        if dynamic.is_unit() {
+            return Ok(Self::Unit);
+        } else if dynamic.is_bool() {
+            match dynamic.as_bool() {
+                Ok(v) => {
+                    return Ok(Self::Bool(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to bool!");
+                }
             }
-            _ => {anyhow::bail!("Unsupported type for \"{:?}\"!", dynamic);},
+        } else if dynamic.is_int() {
+            match dynamic.as_int() {
+                Ok(v) => {
+                    return Ok(Self::Integer(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to int!");
+                }
+            }
+        } else if dynamic.is_float() {
+            match dynamic.as_float() {
+                Ok(v) => {
+                    return Ok(Self::Float(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to float!");
+                }
+            }
+        } else if dynamic.is_array() {
+            match dynamic.as_array_ref() {
+                Ok(ary) => {
+                    let mut vec=rhai_bytecode::VEC::<Self>::with_capacity(ary.len());
+                    for item in ary.iter() {
+                        vec.push(Self::from_dynamic(item)?);
+                    }
+                    return Ok(Self::Array(vec));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to array!");
+                }
+            }
+        }else{
+            anyhow::bail!("Unsupported type \"{:?}\"!", dynamic.type_name());
         }
     }
-    
-    fn from_variable_ref(var:std::rc::Rc<std::cell::RefCell<Self>>) -> anyhow::Result<Self> {
-        return Ok(SimpleDynamicValue::Reference(var));
+    fn from_unit() -> Self{
+        return Self::Unit;
     }
-
-    fn from_unit() -> anyhow::Result<Self> {
-        return Ok(SimpleDynamicValue::Unit);
+    fn from_bool(v:bool) -> anyhow::Result<Self> {
+        return Ok(Self::Bool(v));
     }
-
-    fn from_bool(v: bool) -> anyhow::Result<Self> {
-        return Ok(SimpleDynamicValue::Bool(v));
+    fn from_integer(v:rhai_bytecode::INT) -> anyhow::Result<Self> {
+        return Ok(Self::Integer(v));
     }
-
-    fn from_char(v: char) -> anyhow::Result<Self> {
-        // Simplely, we'll just cast the char as an integer.
-        return Ok(SimpleDynamicValue::Integer(v as rhai_bytecode::INT));
+    fn from_float(v:rhai_bytecode::FLOAT) -> anyhow::Result<Self> {
+        return Ok(Self::Float(v));
     }
-
-    fn from_integer(v: rhai_bytecode::INT) -> anyhow::Result<Self> {
-        return Ok(SimpleDynamicValue::Integer(v));
+    fn from_char(_v:char) -> anyhow::Result<Self> {
+        anyhow::bail!("Unsupported type \"char\"!");
     }
-
-    fn from_float(v: rhai_bytecode::FLOAT) -> anyhow::Result<Self> {
-        return Ok(SimpleDynamicValue::Float(v));
+    fn from_string(_v:&String) -> anyhow::Result<Self> {
+        anyhow::bail!("Unsupported type \"string\"!");
     }
-
-    fn is_unit(&self) -> anyhow::Result<bool> {
-        match self.get_value()? {
-            SimpleDynamicValue::Unit => {
-                return Ok(true);
+    fn index_into(&self,ind:rhai_bytecode::SIZE)->anyhow::Result<Self> {
+        match self {
+            Self::Array(vec) => {
+                let index= ind as usize;
+                if index >= vec.len() {
+                    anyhow::bail!("Index \"{}\" out of range!",ind);
+                } else {
+                    return Ok(vec[index].clone());
+                }
             }
             _ => {
-                return Ok(false);
+                anyhow::bail!("Cannot index into \"{:?}\"!",self);
             }
         }
     }
-
-    fn to_bool(&self) -> anyhow::Result<bool> {
-        match self.get_value()? {
-            SimpleDynamicValue::Bool(v) => {
-                return Ok(v);
+    fn multi_index_into(&self,inds:&[rhai_bytecode::SIZE])->anyhow::Result<&Self> {
+        if inds.is_empty() {
+            return Ok(self);
+        } else{
+            let mut current=self;
+            for ind in inds {
+                match current {
+                    Self::Array(vec) => {
+                        let index= *ind as usize;
+                        if index >= vec.len() {
+                            anyhow::bail!("Index \"{}\" out of range!",index);
+                        } else {
+                            current=&vec[index];
+                        }
+                    }
+                    _ => {
+                        anyhow::bail!("Cannot index into \"{:?}\"!",current);
+                    }
+                }
             }
-            SimpleDynamicValue::Integer(v) => {
-                return Ok(v != 0);
+            return Ok(current);
+        }
+    }
+    fn is_unit(&self) -> bool{
+        match self {
+            Self::Unit => {return true;}
+            _ => {return false;}
+        }
+    }
+    fn to_bool(&self) -> anyhow::Result<bool>{
+        match self {
+            Self::Bool(v) => {
+                return Ok(*v);
             }
-            SimpleDynamicValue::Float(v) => {
-                return Ok(!v.is_nan() && v != 0.0);
+            Self::Integer(v) => {
+                return Ok(*v != 0);
+            }
+            Self::Float(v) => {
+                return Ok(!v.is_nan() && *v != 0.0);
             }
             _ => {
                 anyhow::bail!("Cannot convert \"{:?}\" to bool!", self);
             }
         }
     }
-
-    fn to_size(&self) -> anyhow::Result<rhai_bytecode::OpSize> {
-        match self.get_value()? {
-            SimpleDynamicValue::Integer(v) => {
-                return Ok(v as rhai_bytecode::OpSize);
+    fn to_size(&self) -> anyhow::Result<rhai_bytecode::SIZE>{
+        match self {
+            Self::Integer(v) => {
+                return Ok(*v as rhai_bytecode::SIZE);
             }
             _ => {
                 anyhow::bail!("Cannot convert \"{:?}\" to size!", self);
             }
         }
     }
-
-    fn get_value(&self) -> anyhow::Result<Self> {
-        match self {
-            SimpleDynamicValue::Reference(rc) => {
-                let a=rc.try_borrow()?;
-                return a.get_value();
-            }
-            _ => {
-                return Ok(self.clone());
-            }
-        }
-    }
-    
-    fn set_value(&self,val:Self) -> anyhow::Result<()> {
-        match self{
-            SimpleDynamicValue::Reference(rc)=>{
-                *(rc.try_borrow_mut()?)=val;
-                return Ok(());
-            }
-            _ => {
-                anyhow::bail!("Variable \"{:?}\" is not a reference!", self);
-            }
-        }
-    }
-
-    fn enter_index(&mut self, ind: rhai_bytecode::OpSize) -> anyhow::Result<()> {
-        let immutable_self: &SimpleDynamicValue=self;
-        let new_value=
-        match immutable_self {
-            SimpleDynamicValue::Array(vec) => {
-                let index= ind as usize;
-                if index >= vec.len() {
-                    anyhow::bail!("Index \"{}\" out of bounds!",ind);
-                }else{
-                    //vec[index].try_borrow()?.clone()
-                    vec[index].clone()
-                }
-            }
-            SimpleDynamicValue::Reference(rc)=>{
-                match rc.try_borrow()?.deref() {
-                    SimpleDynamicValue::Array(vec) => {
-                        let index= ind as usize;
+    fn set_value(&mut self,inds:&[rhai_bytecode::SIZE],value:Self)->anyhow::Result<()> {
+        if inds.is_empty() {
+            *self=value;
+            return Ok(());
+        }else{
+            let mut current=self;
+            for ind in inds{
+                match current {
+                    Self::Array(vec) => {
+                        let index= *ind as usize;
                         if index >= vec.len() {
-                            anyhow::bail!("Index \"{}\" out of bounds!",ind);
-                        }else{
-                            //vec[index].try_borrow()?.clone()
-                            vec[index].clone()
+                            anyhow::bail!("Index \"{}\" out of range!",index);
+                        } else {
+                            current=&mut vec[index];
                         }
                     }
                     _ => {
-                        anyhow::bail!("Variable \"{:?}\" does not have index!", self);
+                        anyhow::bail!("Cannot index into \"{:?}\"!",current);
                     }
                 }
             }
-            _ => {
-                anyhow::bail!("Variable \"{:?}\" does not have index!", self);
+            *current=value;
+            return Ok(());
+        }
+    }
+    fn multi_index_into_mut(&mut self,inds:&[rhai_bytecode::SIZE])->anyhow::Result<&mut Self> {
+        if inds.is_empty() {
+            return Ok(self);
+        } else{
+            let mut current=self;
+            for ind in inds {
+                match current {
+                    Self::Array(vec) => {
+                        let index= *ind as usize;
+                        if index >= vec.len() {
+                            anyhow::bail!("Index \"{}\" out of range!",index);
+                        } else {
+                            current=&mut vec[index];
+                        }
+                    }
+                    _ => {
+                        anyhow::bail!("Cannot index into \"{:?}\"!",current);
+                    }
+                }
             }
-        };
-        *self=SimpleDynamicValue::Reference(new_value);
-        return Ok(());
+            return Ok(current);
+        }
     }
 }
 
-fn not(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 1 {
-        anyhow::bail!(
-            "Operator \"!\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        match a {
-            SimpleDynamicValue::Unit => {
-                return Ok(SimpleDynamicValue::Bool(true));
+impl SimpleBasicValue {
+    fn not(&self) -> anyhow::Result<Self> {
+        match self {
+            Self::Unit => {
+                return Ok(Self::Bool(true));
             }
-            SimpleDynamicValue::Bool(va) => {
-                return Ok(SimpleDynamicValue::Bool(!va));
+            Self::Bool(va) => {
+                return Ok(Self::Bool(!va));
             }
-            SimpleDynamicValue::Integer(va)=>{
-                return Ok(SimpleDynamicValue::Bool(va==0));
+            Self::Integer(va) => {
+                return Ok(Self::Bool(*va == 0));
             }
-            SimpleDynamicValue::Float(va) => {
-                return Ok(SimpleDynamicValue::Bool(va.is_nan()||va==0.0));
+            Self::Float(va) => {
+                return Ok(Self::Bool(va.is_nan()||*va == 0.0));
             }
-            _=> {
+            _=>{
                 anyhow::bail!(
                     "Operator \"!\" can not be applied to \"{:?}\"!",
-                    args[0].get_value()?
+                    self
                 );
             }
         }
     }
-}
-
-fn add(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"+\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    } else {
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a, b) {
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Integer(va + vb));
+    fn add(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(Self::Integer(*va + *vb));
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va as rhai_bytecode::FLOAT + vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok(Self::Float((*va as rhai_bytecode::FLOAT) + *vb));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va + vb));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(Self::Float(*va + (*vb as rhai_bytecode::FLOAT)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va + vb as rhai_bytecode::FLOAT));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(Self::Float(*va + *vb));
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"+\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn subtract(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"-\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    } else {
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a, b) {
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Integer(va - vb));
+    fn subtract(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(Self::Integer(*va - *vb));
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va as rhai_bytecode::FLOAT - vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok(Self::Float((*va as rhai_bytecode::FLOAT) - *vb));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va - vb));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(Self::Float(*va - (*vb as rhai_bytecode::FLOAT)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va - vb as rhai_bytecode::FLOAT));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(Self::Float(*va - *vb));
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"-\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn multiply(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue>{
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"*\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    } else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Integer(va * vb));
+    fn multiply(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(Self::Integer(*va * *vb));
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va as rhai_bytecode::FLOAT * vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok(Self::Float((*va as rhai_bytecode::FLOAT) * *vb));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va * vb));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(Self::Float(*va * (*vb as rhai_bytecode::FLOAT)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va * vb as rhai_bytecode::FLOAT));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(Self::Float(*va * *vb));
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"*\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn divide(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"/\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    } else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                if vb == 0 {
+    fn divide(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                if *vb == 0 {
                     anyhow::bail!("Divisor can not be zero!");
                 }else{
-                    return Ok(SimpleDynamicValue::Integer(va / vb));
+                    return Ok(Self::Integer(*va / *vb));
                 }
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va as rhai_bytecode::FLOAT / vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok(Self::Float((*va as rhai_bytecode::FLOAT) / *vb));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va / vb));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(Self::Float(*va / (*vb as rhai_bytecode::FLOAT)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va / vb as rhai_bytecode::FLOAT));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(Self::Float(*va / *vb));
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"/\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn modulus(args: &Vec<SimpleDynamicValue>)-> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"%\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    } else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b){
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                if vb == 0 {
+    fn modulus(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                if *vb == 0 {
                     anyhow::bail!("Divisor can not be zero!");
                 }else{
-                    return Ok(SimpleDynamicValue::Integer(va % vb));
+                    return Ok(Self::Integer(*va % *vb));
                 }
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"%\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn power(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"^\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b){
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                match vb.try_into() {
+    fn power(&self,other: &Self) -> anyhow::Result<Self> {
+        match (self,other) {
+            (Self::Integer(va), Self::Integer(vb)) => {
+                match (*vb).try_into() {
                     Ok(v) => {
-                        return Ok(SimpleDynamicValue::Integer(va.pow(v)));
+                        return Ok(Self::Integer(va.pow(v)));
                     }
                     Err(_) => {
-                        return Ok(SimpleDynamicValue::Float((va as rhai_bytecode::FLOAT).powf(vb as rhai_bytecode::FLOAT)));
+                        return Ok(Self::Float((*va as rhai_bytecode::FLOAT).powf(*vb as rhai_bytecode::FLOAT)));
                     }
                 }
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float((va as rhai_bytecode::FLOAT).powf(vb)));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok(Self::Float((*va as rhai_bytecode::FLOAT).powf(*vb)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va.powf(vb)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(Self::Float(va.powf(*vb as rhai_bytecode::FLOAT)));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Float(va.powf(vb as rhai_bytecode::FLOAT)));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(Self::Float(va.powf(*vb)));
             }
             _ => {
                 anyhow::bail!(
                     "Operator \"^\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn assign(args: &Vec<SimpleDynamicValue>,) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let res= args[1].get_value()?;
-        args[0].set_value(res.clone())?;
-        return Ok(res);
-    }
-}
-
-fn add_assign(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"+=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let res=add(args)?;
-        args[0].set_value(res.clone())?;
-        return Ok(res);
-    }
-}
-
-fn subtract_assign(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"-=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let res=subtract(args)?;
-        args[0].set_value(res.clone())?;
-        return Ok(res);
-    }
-}
-
-fn multiply_assign(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"*=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let res=multiply(args)?;
-        args[0].set_value(res.clone())?;
-        return Ok(res);
-    }
-}
-
-fn divide_assign(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"/=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let res=divide(args)?;
-        args[0].set_value(res.clone())?;
-        return Ok(res);
-    }
-}
-
-fn equals(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"==\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(true));
+    fn equals(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(true);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va==vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va == *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va == vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va == *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) == vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) == *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va == (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va == (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va == vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va == *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \"==\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn not_equals(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"!=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(false));
+    fn not_equals(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(false);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va!=vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va != *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va != vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va != *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) != vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) != *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va != (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va != (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va != vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va != *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \"!=\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn less_than(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"<\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(false));
+    fn less_than(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(false);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va<vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va < *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va < vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va < *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) < vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) < *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va < (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va < (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va < vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va < *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \"<\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn greater_than(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue> {
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \">\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(false));
+    fn greater_than(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(false);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va>vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va > *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va > vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va > *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) > vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) > *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va > (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va > (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va > vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va > *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \">\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn less_equal_to(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue>{
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \"<=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(true));
+    fn less_equal_to(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(true);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va<=vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va <= *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va <= vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va <= *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) <= vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) <= *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va <= (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va <= (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va <= vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va <= *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \"<=\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
-}
-
-fn greater_equal_to(args: &Vec<SimpleDynamicValue>) -> anyhow::Result<SimpleDynamicValue>{
-    if args.len() != 2 {
-        anyhow::bail!(
-            "Operator \">=\" needs 2 arguments, but {} provided!",
-            args.len()
-        );
-    }else{
-        let a = args[0].get_value()?;
-        let b = args[1].get_value()?;
-        match (a,b) {
-            (SimpleDynamicValue::Unit, SimpleDynamicValue::Unit) => {
-                return Ok(SimpleDynamicValue::Bool(true));
+    fn greater_equal_to(&self,other: &Self) -> anyhow::Result<bool> {
+        match (self,other){
+            (Self::Unit, Self::Unit) => {
+                return Ok(true);
             }
-            (SimpleDynamicValue::Bool(va), SimpleDynamicValue::Bool(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va>=vb));
+            (Self::Bool(va), Self::Bool(vb)) => {
+                return Ok(*va >= *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va >= vb));
+            (Self::Integer(va), Self::Integer(vb)) => {
+                return Ok(*va >= *vb);
             }
-            (SimpleDynamicValue::Integer(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool((va as f64) >= vb));
+            (Self::Integer(va), Self::Float(vb)) => {
+                return Ok((*va as rhai_bytecode::FLOAT) >= *vb);
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Integer(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va >= (vb as f64)));
+            (Self::Float(va), Self::Integer(vb)) => {
+                return Ok(*va >= (*vb as rhai_bytecode::FLOAT));
             }
-            (SimpleDynamicValue::Float(va), SimpleDynamicValue::Float(vb)) => {
-                return Ok(SimpleDynamicValue::Bool(va >= vb));
+            (Self::Float(va), Self::Float(vb)) => {
+                return Ok(*va >= *vb);
             }
-            _=>{
+            _ => {
                 anyhow::bail!(
                     "Operator \">=\" can not be applied to \"{:?}\" and \"{:?}\"!",
-                    args[0].get_value()?,
-                    args[1].get_value()?
+                    self,
+                    other
                 );
             }
         }
     }
 }
 
-pub(crate) fn new_executer() -> anyhow::Result<rhai_bytecode::Executer<SimpleDynamicValue>> {
-    let mut executer = rhai_bytecode::Executer::<SimpleDynamicValue>::new();
-    executer.add_fn("!", not)?;
-    executer.add_fn("+", add)?;
-    executer.add_fn("-", subtract)?;
-    executer.add_fn("*", multiply)?;
-    executer.add_fn("/", divide)?;
-    executer.add_fn("%", modulus)?;
-    executer.add_fn("^", power)?;
-    executer.add_fn("=", assign)?;
-    executer.add_fn("+=", add_assign)?;
-    executer.add_fn("-=", subtract_assign)?;
-    executer.add_fn("*=", multiply_assign)?;
-    executer.add_fn("/=", divide_assign)?;
-    executer.add_fn("==", equals)?;
-    executer.add_fn("!=", not_equals)?;
-    executer.add_fn("<", less_than)?;
-    executer.add_fn(">", greater_than)?;
-    executer.add_fn("<=", less_equal_to)?;
-    executer.add_fn(">=", greater_equal_to)?;
+fn not(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.not()?));
+}
+
+fn add(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.add(args[1].deref(variables)?)?));
+}
+
+fn subtract(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.subtract(args[1].deref(variables)?)?));
+}
+
+fn multiply(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.multiply(args[1].deref(variables)?)?));
+}
+
+fn divide(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.divide(args[1].deref(variables)?)?));
+}
+
+fn modulus(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.modulus(args[1].deref(variables)?)?));
+}
+
+fn power(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(args[0].deref(variables)?.power(args[1].deref(variables)?)?));
+}
+
+fn assign(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let rhs=args[1].get_value(variables)?;
+    args[0].set_value(variables, rhs)?;
+    return Ok(args[0].clone());
+}
+
+fn add_assign(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let res=args[0].deref(variables)?.add(args[1].deref(variables)?)?;
+    args[0].set_value(variables,res)?;
+    return Ok(args[0].clone());
+}
+
+fn subtract_assign(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let res=args[0].deref(variables)?.subtract(args[1].deref(variables)?)?;
+    args[0].set_value(variables,res)?;
+    return Ok(args[0].clone());
+}
+
+fn multiply_assign(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let res=args[0].deref(variables)?.multiply(args[1].deref(variables)?)?;
+    args[0].set_value(variables,res)?;
+    return Ok(args[0].clone());
+}
+
+fn divide_assign(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let res=args[0].deref(variables)?.divide(args[1].deref(variables)?)?;
+    args[0].set_value(variables,res)?;
+    return Ok(args[0].clone());
+}
+
+fn equals(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.equals(args[1].deref(variables)?)?)));
+}
+
+fn not_equals(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.not_equals(args[1].deref(variables)?)?)));
+}
+
+fn less_than(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.less_than(args[1].deref(variables)?)?)));
+}
+
+fn greater_than(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.greater_than(args[1].deref(variables)?)?)));
+}
+
+fn less_equal_to(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.less_equal_to(args[1].deref(variables)?)?)));
+}
+
+fn greater_equal_to(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.greater_equal_to(args[1].deref(variables)?)?)));
+}
+
+pub(crate) fn new_executer() -> anyhow::Result<rhai_bytecode::Executer<SimpleBasicValue>> {
+    let mut executer = rhai_bytecode::Executer::<SimpleBasicValue>::new();
+    executer.add_fn("!", not,1,1)?;
+    executer.add_fn("+", add,2,2)?;
+    executer.add_fn("-", subtract,2,2)?;
+    executer.add_fn("*", multiply,2,2)?;
+    executer.add_fn("/", divide,2,2)?;
+    executer.add_fn("%", modulus,2,2)?;
+    executer.add_fn("^", power,2,2)?;
+    executer.add_fn("=", assign,2,2)?;
+    executer.add_fn("+=", add_assign,2,2)?;
+    executer.add_fn("-=", subtract_assign,2,2)?;
+    executer.add_fn("*=", multiply_assign,2,2)?;
+    executer.add_fn("/=", divide_assign,2,2)?;
+    executer.add_fn("==", equals,2,2)?;
+    executer.add_fn("!=", not_equals,2,2)?;
+    executer.add_fn("<", less_than,2,2)?;
+    executer.add_fn(">", greater_than,2,2)?;
+    executer.add_fn("<=", less_equal_to,2,2)?;
+    executer.add_fn(">=", greater_equal_to,2,2)?;
     return Ok(executer);
 }
