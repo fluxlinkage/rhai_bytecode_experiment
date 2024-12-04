@@ -10,9 +10,6 @@ fn new_array_for_rhai(l:rhai_bytecode::INT,v:rhai_bytecode::rhai::Dynamic)->rhai
 fn new_array_for_rhai_bytecode(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>>  {
     let l=args[0].deref(variables)?.to_size()? as usize;
     return  Ok(DynamicValue::Basic(SimpleBasicValue::Array(rhai_bytecode::new_vec(args[1].deref(variables)?.clone(), l))));
-    // let mut vec=rhai_bytecode::VEC::<SimpleBasicValue>::with_capacity(l);
-    // vec.resize(l, args[1].deref(variables)?.clone());
-    // return Ok(DynamicValue::Basic(SimpleBasicValue::Array(vec)));
 }
 
 fn main() {

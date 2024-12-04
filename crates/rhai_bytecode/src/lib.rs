@@ -41,7 +41,7 @@ pub trait DynamicBasicValue: Sized + Clone {
     fn to_bool(&self) -> anyhow::Result<bool>;
     fn to_size(&self) -> anyhow::Result<SIZE>;
     fn set_value(&mut self,inds:&[SIZE],value:Self)->anyhow::Result<()>;
-    fn iter(&self,index:SIZE) -> anyhow::Result<(Self,SIZE)>;
+    fn iter(&self,index:SIZE) -> anyhow::Result<Option<Self>>;
 }
 
 #[derive(Clone, Debug)]
@@ -98,16 +98,16 @@ impl<B:DynamicBasicValue+std::fmt::Debug> DynamicValue<B> {
     fn to_size(&self,variables: &Vec<B>) -> anyhow::Result<SIZE>{
         return self.deref(variables)?.to_size();
     }
-    fn iter(&self,index_var: &Self,variables: &mut Vec<B>) -> anyhow::Result<Option<B>>{
-        let index=index_var.get_value(variables)?.to_size()?;
-        let (res,new_index)=self.deref(variables)?.iter(index)?;
-        if new_index==SIZE::MAX {
-            return Ok(None);
-        }else {
-            index_var.set_value(variables,B::from_integer(new_index as INT)?)?;
-            return Ok(Some(res));
-        }
-    }
+    // fn iter(&self,index_var: &Self,variables: &mut Vec<B>) -> anyhow::Result<Option<B>>{
+    //     let index=index_var.get_value(variables)?.to_size()?;
+    //     let (res,new_index)=self.deref(variables)?.iter(index)?;
+    //     if new_index==SIZE::MAX {
+    //         return Ok(None);
+    //     }else {
+    //         index_var.set_value(variables,B::from_integer(new_index as INT)?)?;
+    //         return Ok(Some(res));
+    //     }
+    // }
     pub fn to_basic(&self) -> anyhow::Result<&B> {
         match self {
             DynamicValue::Basic(v) => {
@@ -188,7 +188,7 @@ impl<B:DynamicBasicValue+std::fmt::Debug> DynamicValue<B> {
     }
 }
 
-#[derive(Debug,serde::Serialize, serde::Deserialize)]
+#[derive(Clone,Debug,serde::Serialize, serde::Deserialize)]
 pub enum ByteCode<B:DynamicBasicValue> {
     #[serde(rename="DC")]
     DynamicConstant(B),
@@ -225,7 +225,7 @@ pub enum ByteCode<B:DynamicBasicValue> {
     #[serde(rename="I")]
     Index,
     #[serde(rename="IT")]
-    Iter(SIZE),
+    Iter(SIZE,SIZE,SIZE,SIZE),
     #[serde(rename="R")]
     Return,
     #[serde(rename="P")]
@@ -634,7 +634,6 @@ fn append_stmt<B:DynamicBasicValue>(
                 Some(name) => name.as_str(),
                 None => "(loop_index)"
             });
-            //let loop_max_id = append_return_index(variables, "(loop_max)");
             let loop_range_id = append_return_index(variables, "(loop_range)");
             append_expr(
                 functions,
@@ -651,11 +650,11 @@ fn append_stmt<B:DynamicBasicValue>(
             byte_codes.push(ByteCode::VarInit(loop_index_id));
             byte_codes.push(ByteCode::PopStack);
             let start_pos = byte_codes.len();
-            byte_codes.push(ByteCode::Variable(loop_range_id));
-            byte_codes.push(ByteCode::Variable(loop_index_id));
-            byte_codes.push(ByteCode::Variable(loop_var_id));
-            let jz_pos = byte_codes.len();
-            byte_codes.push(ByteCode::Iter(0));
+            // byte_codes.push(ByteCode::Variable(loop_range_id));
+            // byte_codes.push(ByteCode::Variable(loop_index_id));
+            // byte_codes.push(ByteCode::Variable(loop_var_id));
+            // let jz_pos = byte_codes.len();
+            byte_codes.push(ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,0));
             let mut new_break_pos = Vec::<usize>::new();
             let mut new_continue_pos = Vec::<usize>::new();
             let var_len=variables.len();
@@ -679,7 +678,7 @@ fn append_stmt<B:DynamicBasicValue>(
             for pos_continue in &new_continue_pos {
                 byte_codes[*pos_continue] = ByteCode::Jump(start_pos as SIZE);
             }
-            byte_codes[jz_pos] = ByteCode::Iter(end_pos as SIZE);
+            byte_codes[start_pos] = ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,end_pos as SIZE);
         }
         Stmt::Var(data, _, _) => {
             append_expr(
@@ -873,8 +872,8 @@ pub fn ast_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
             ByteCode::JumpIfNotNull(pos) => {
                 byte_codes[i]=ByteCode::JumpIfNotNull(trace_jump(*pos,&byte_codes));
             }
-            ByteCode::Iter(pos) => {
-                byte_codes[i]=ByteCode::Iter(trace_jump(*pos,&byte_codes));
+            ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,pos) => {
+                byte_codes[i]=ByteCode::Iter(*loop_range_id,*loop_index_id,*loop_var_id,trace_jump(*pos,&byte_codes));
             }
             _=>{}
         }
@@ -1093,26 +1092,39 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             ByteCode::PopStack => {
                 variable_stack.pop();
             }
-            ByteCode::Iter(p) => {
-                let stack_len = variable_stack.len();
-                if stack_len<3 {
-                    anyhow::bail!("Not enough arguments for iteration!");
-                } else {
-                    let range=&variable_stack[stack_len-3];
-                    let index=&variable_stack[stack_len-2];
-                    let var=&variable_stack[stack_len-1];
-                    match range.iter(index,&mut variables)? {
-                        Some(v) => {
-                            var.set_value(&mut variables, v)?;
-                            variable_stack.truncate(stack_len-3);
-                        }
-                        None => {
-                            variable_stack.truncate(stack_len-3);
-                            pos = *p as usize;
-                            continue;
-                        }
+            ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,p) => {
+                let index=variables[*loop_index_id as usize].to_size()?;
+                match variables[*loop_range_id as usize].iter(index)? {
+                    Some(v) => {
+                        variables[*loop_var_id as usize]=v;
+                        let new_index=index+1;
+                        variables[*loop_index_id as usize]=B::from_integer(new_index as INT)?;
+                    }
+                    None => {
+                        pos = *p as usize;
+                        continue;
                     }
                 }
+                //let (val,new_index)=variables[*loop_range_id as usize].iter(variables[*loop_index_id as usize].to_size()?)?;
+                // let stack_len = variable_stack.len();
+                // if stack_len<3 {
+                //     anyhow::bail!("Not enough arguments for iteration!");
+                // } else {
+                //     let range=&variable_stack[stack_len-3];
+                //     let index=&variable_stack[stack_len-2];
+                //     let var=&variable_stack[stack_len-1];
+                //     match range.iter(index,&mut variables)? {
+                //         Some(v) => {
+                //             var.set_value(&mut variables, v)?;
+                //             variable_stack.truncate(stack_len-3);
+                //         }
+                //         None => {
+                //             variable_stack.truncate(stack_len-3);
+                //             pos = *p as usize;
+                //             continue;
+                //         }
+                //     }
+                // }
             }
         }
         pos += 1;

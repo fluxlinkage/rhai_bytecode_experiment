@@ -231,22 +231,22 @@ impl DynamicBasicValue for SimpleBasicValue {
             return Ok(current);
         }
     }
-    fn iter(&self,index:rhai_bytecode::SIZE) -> anyhow::Result<(Self,rhai_bytecode::SIZE)> {
+    fn iter(&self,index:rhai_bytecode::SIZE) -> anyhow::Result<Option<Self>> {
         match self {
             Self::Array(vec) => {
                 let ind= index as usize;
                 if ind >= vec.len() {
-                    return Ok((Self::Unit,rhai_bytecode::SIZE::MAX));
+                    return Ok(None);
                 } else {
-                    return Ok((vec[ind].clone(),index+1));
+                    return Ok(Some(vec[ind].clone()));
                 }
             }
             Self::Range(start, len) => {
                 let offset = index as rhai_bytecode::INT;
                 if offset >= *len {
-                    return Ok((Self::Unit,rhai_bytecode::SIZE::MAX));
+                    return Ok(None);
                 }else {
-                    return Ok((Self::Integer(*start+offset),index+1));
+                    return Ok(Some(Self::Integer(*start+offset)));
                 }
             }
             _=> {
