@@ -806,6 +806,19 @@ fn append_stmt<B:DynamicBasicValue>(
     return Ok(());
 }
 
+fn trace_jump<B: DynamicBasicValue+std::fmt::Debug>(init_pos:SIZE,byte_codes: &Vec<ByteCode<B>>)->SIZE {
+    let init_pos_sz= init_pos as usize;
+    if init_pos_sz < byte_codes.len() {
+        match byte_codes[init_pos_sz] {
+            ByteCode::Jump(pos) => {
+                return trace_jump(pos, byte_codes);
+            }
+            _=>{}
+        }
+    }
+    return init_pos;
+}
+
 pub fn ast_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
     executer: &Executer<B>,
     initial_variables: &mut Vec<String>,
@@ -838,6 +851,26 @@ pub fn ast_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
             _ => {}
         },
         None => {}
+    }
+    for i in 0..byte_codes.len() {
+        match &byte_codes[i] {
+            ByteCode::Jump(pos) => {
+                byte_codes[i]=ByteCode::Jump(trace_jump(*pos,&byte_codes));
+            }
+            ByteCode::JumpIfTrue(pos) => {
+                byte_codes[i]=ByteCode::JumpIfTrue(trace_jump(*pos,&byte_codes));
+            }
+            ByteCode::JumpIfFalse(pos) => {
+                byte_codes[i]=ByteCode::JumpIfFalse(trace_jump(*pos,&byte_codes));
+            }
+            ByteCode::JumpIfNotNull(pos) => {
+                byte_codes[i]=ByteCode::JumpIfNotNull(trace_jump(*pos,&byte_codes));
+            }
+            ByteCode::Iter(pos) => {
+                byte_codes[i]=ByteCode::Iter(trace_jump(*pos,&byte_codes));
+            }
+            _=>{}
+        }
     }
     return Ok(byte_codes);
 }
