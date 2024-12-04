@@ -2,7 +2,7 @@ use rhai_bytecode::{self,DynamicBasicValue, DynamicValue};
 
 /// Simple that only supports a subset of the types (bool, integer, float, array) that are supported by Rhai.
 #[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
-//#[serde(untagged)]
+#[serde(untagged)]
 pub(crate) enum SimpleBasicValue {
     #[serde(rename="U")]
     Unit,
@@ -12,7 +12,7 @@ pub(crate) enum SimpleBasicValue {
     Integer(rhai_bytecode::INT),
     #[serde(rename="F")]
     Float(rhai_bytecode::FLOAT),
-    #[serde(rename="S")]
+    #[serde(rename="A")]
     Array(rhai_bytecode::VEC<SimpleBasicValue>)
 }
 
@@ -198,6 +198,22 @@ impl DynamicBasicValue for SimpleBasicValue {
                 }
             }
             return Ok(current);
+        }
+    }
+    
+    fn iter(&self,index:rhai_bytecode::SIZE) -> anyhow::Result<(Self,rhai_bytecode::SIZE)> {
+        match self {
+            Self::Array(vec) => {
+                let ind= index as usize;
+                if ind >= vec.len() {
+                    return Ok((Self::Unit,rhai_bytecode::SIZE::MAX));
+                } else {
+                    return Ok((vec[ind].clone(),index+1));
+                }
+            }
+            _=> {
+                anyhow::bail!("Cannot iterate over \"{:?}\"!",self);
+            }
         }
     }
 }
