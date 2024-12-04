@@ -9,9 +9,10 @@ fn new_array_for_rhai(l:rhai_bytecode::INT,v:rhai_bytecode::rhai::Dynamic)->rhai
 
 fn new_array_for_rhai_bytecode(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>>  {
     let l=args[0].deref(variables)?.to_size()? as usize;
-    let mut vec=rhai_bytecode::VEC::<SimpleBasicValue>::with_capacity(l);
-    vec.resize(l, args[1].deref(variables)?.clone());
-    return Ok(DynamicValue::Basic(SimpleBasicValue::Array(vec)));
+    return  Ok(DynamicValue::Basic(SimpleBasicValue::Array(rhai_bytecode::new_vec(args[1].deref(variables)?.clone(), l))));
+    // let mut vec=rhai_bytecode::VEC::<SimpleBasicValue>::with_capacity(l);
+    // vec.resize(l, args[1].deref(variables)?.clone());
+    // return Ok(DynamicValue::Basic(SimpleBasicValue::Array(vec)));
 }
 
 fn main() {
@@ -22,9 +23,7 @@ fn main() {
     prime_mask[0] = false;
     prime_mask[1] = false;
     let total_primes_found = 0;
-    let p = 1;
-    while p < MAX_NUMBER_TO_CHECK {
-        p += 1;
+    for p in 2..=MAX_NUMBER_TO_CHECK {
         if !prime_mask[p] { continue; }
         total_primes_found += 1;
         let i = 2 * p;

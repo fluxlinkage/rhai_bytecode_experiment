@@ -19,6 +19,13 @@ pub type VEC<T> = thin_vec::ThinVec<T>;
 #[cfg(not(feature = "thin-vec"))]
 pub type VEC<T> = Vec<T>;
 
+pub fn new_vec<T:Clone>(element:T,size:usize) -> VEC<T> {
+    #[cfg(feature = "thin-vec")]
+    return thin_vec![element;size];
+    #[cfg(not(feature = "thin-vec"))]
+    return vec![element;size];
+}
+
 pub trait DynamicBasicValue: Sized + Clone {
     fn from_dynamic(dynamic: &rhai::Dynamic) -> anyhow::Result<Self>;
     fn from_unit() -> Self;

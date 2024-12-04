@@ -1,8 +1,8 @@
-use rhai_bytecode::{self,DynamicBasicValue, DynamicValue};
+use rhai_bytecode::{self, DynamicBasicValue, DynamicValue};
 
 /// Simple that only supports a subset of the types (bool, integer, float, array) that are supported by Rhai.
 #[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
+//#[serde(untagged)]
 pub(crate) enum SimpleBasicValue {
     #[serde(rename="U")]
     Unit,
@@ -13,7 +13,9 @@ pub(crate) enum SimpleBasicValue {
     #[serde(rename="F")]
     Float(rhai_bytecode::FLOAT),
     #[serde(rename="A")]
-    Array(rhai_bytecode::VEC<SimpleBasicValue>)
+    Array(rhai_bytecode::VEC<SimpleBasicValue>),
+    #[serde(rename="R")]
+    Range(rhai_bytecode::INT,rhai_bytecode::INT),
 }
 
 impl DynamicBasicValue for SimpleBasicValue {
@@ -58,6 +60,35 @@ impl DynamicBasicValue for SimpleBasicValue {
                 }
                 Err(_) => {
                     anyhow::bail!("Failed to convert rhai::Dynamic to array!");
+                }
+            }
+        }else if dynamic.type_id()== std::any::TypeId::of::<std::ops::Range<rhai_bytecode::INT>>() {
+            match dynamic.clone().try_cast_result::<std::ops::Range<rhai_bytecode::INT>>() {
+                Ok(range) => {
+                    let l=range.end-range.start;
+                    if l < 0 {
+                        anyhow::bail!("Range \"{:?}\"'s start is greater than its end!",range);
+                    } else {
+                        return Ok(Self::Range(range.start,l));
+                    }
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to range!");
+                }
+            }
+        }else if dynamic.type_id()== std::any::TypeId::of::<std::ops::RangeInclusive<rhai_bytecode::INT>>() {
+            match dynamic.clone().try_cast_result::<std::ops::RangeInclusive<rhai_bytecode::INT>>() {
+                Ok(range) => {
+                    // I think this is enough, another type is not needed.
+                    let l=range.end()-range.start();
+                    if l < 0 {
+                        anyhow::bail!("Range \"{:?}\"'s start is greater than its end!",range);
+                    } else {
+                        return Ok(Self::Range(*range.start(),l+1));
+                    }
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to range!");
                 }
             }
         }else{
@@ -200,7 +231,6 @@ impl DynamicBasicValue for SimpleBasicValue {
             return Ok(current);
         }
     }
-    
     fn iter(&self,index:rhai_bytecode::SIZE) -> anyhow::Result<(Self,rhai_bytecode::SIZE)> {
         match self {
             Self::Array(vec) => {
@@ -209,6 +239,14 @@ impl DynamicBasicValue for SimpleBasicValue {
                     return Ok((Self::Unit,rhai_bytecode::SIZE::MAX));
                 } else {
                     return Ok((vec[ind].clone(),index+1));
+                }
+            }
+            Self::Range(start, len) => {
+                let offset = index as rhai_bytecode::INT;
+                if offset >= *len {
+                    return Ok((Self::Unit,rhai_bytecode::SIZE::MAX));
+                }else {
+                    return Ok((Self::Integer(*start+offset),index+1));
                 }
             }
             _=> {
@@ -643,6 +681,50 @@ fn greater_equal_to(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<
     return Ok(DynamicValue::Basic(SimpleBasicValue::Bool(args[0].deref(variables)?.greater_equal_to(args[1].deref(variables)?)?)));
 }
 
+fn range(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let a= args[0].deref(variables)?;
+    let b = args[1].deref(variables)?;
+    match (a,b) {
+        (SimpleBasicValue::Integer(va), SimpleBasicValue::Integer(vb)) => {
+            let l = *vb-*va;
+            if l < 0{
+                anyhow::bail!("Range start \"{}\" is greater than end \"{}\"!", va, vb);
+            } else{
+                return Ok(DynamicValue::Basic(SimpleBasicValue::Range(*va,l)));
+            }
+        }
+        _=>{
+            anyhow::bail!(
+                "Operator \"..\" can not be applied to \"{:?}\" and \"{:?}\"!",
+                a,
+                b
+            );
+        }
+    }
+}
+
+fn range_inclusive(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
+    let a= args[0].deref(variables)?;
+    let b = args[1].deref(variables)?;
+    match (a,b) {
+        (SimpleBasicValue::Integer(va), SimpleBasicValue::Integer(vb)) => {
+            let l = *vb-*va;
+            if l < 0{
+                anyhow::bail!("Range start \"{}\" is greater than end \"{}\"!", va, vb);
+            } else{
+                return Ok(DynamicValue::Basic(SimpleBasicValue::Range(*va,l+1)));
+            }
+        }
+        _=>{
+            anyhow::bail!(
+                "Operator \"..=\" can not be applied to \"{:?}\" and \"{:?}\"!",
+                a,
+                b
+            );
+        }
+    }
+}
+
 pub(crate) fn new_executer() -> anyhow::Result<rhai_bytecode::Executer<SimpleBasicValue>> {
     let mut executer = rhai_bytecode::Executer::<SimpleBasicValue>::new();
     executer.add_fn("!", not,1,1)?;
@@ -663,5 +745,7 @@ pub(crate) fn new_executer() -> anyhow::Result<rhai_bytecode::Executer<SimpleBas
     executer.add_fn(">", greater_than,2,2)?;
     executer.add_fn("<=", less_equal_to,2,2)?;
     executer.add_fn(">=", greater_equal_to,2,2)?;
+    executer.add_fn("..", range,2,2)?;
+    executer.add_fn("..=", range_inclusive,2,2)?;
     return Ok(executer);
 }
