@@ -5,6 +5,9 @@ thread_local! {
     static COMPILE_ENGINE: std::cell::RefCell<rhai::Engine> = std::cell::RefCell::new(rhai::Engine::new_raw());
 }
 
+#[cfg(feature = "thin-vec")]
+#[macro_use] extern crate thin_vec;
+
 #[cfg(feature = "size16")]
 pub type SIZE = u16;
 #[cfg(feature = "size32")]
