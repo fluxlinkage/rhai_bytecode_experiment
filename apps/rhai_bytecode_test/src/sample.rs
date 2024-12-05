@@ -254,6 +254,10 @@ impl DynamicBasicValue for SimpleBasicValue {
             }
         }
     }
+    
+    fn from_array(v:rhai_bytecode::VEC<Self>) -> anyhow::Result<Self> {
+        return Ok(Self::Array(v));
+    }
 }
 
 impl SimpleBasicValue {

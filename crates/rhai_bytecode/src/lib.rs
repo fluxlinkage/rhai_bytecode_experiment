@@ -37,6 +37,7 @@ pub trait DynamicBasicValue: Sized + Clone {
     fn from_float(v:FLOAT) -> anyhow::Result<Self>;
     fn from_char(v:char) -> anyhow::Result<Self>;
     fn from_string(v:&String) -> anyhow::Result<Self>;
+    fn from_array(v:VEC<Self>) -> anyhow::Result<Self>;
     fn index_into(&self,ind:SIZE)->anyhow::Result<Self>;
     fn multi_index_into(&self,inds:&[SIZE])->anyhow::Result<&Self>;
     fn multi_index_into_mut(&mut self,inds:&[SIZE])->anyhow::Result<&mut Self>;
@@ -982,18 +983,18 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             ByteCode::InterpolatedString(_) => {
                 anyhow::bail!("InterpolatedString not supported yet!");
             }
-            ByteCode::ConstructArray(_) => {
-                anyhow::bail!("ConstructArray not supported yet!");
-                // let mut arr = Vec::<rhai::Dynamic>::with_capacity(*l as usize);
-                // if variable_stack.len() < *l as usize {
-                //     anyhow::bail!("Not enough elements to construct array");
-                // }
-                // let start_position = variable_stack.len() - *l as usize;
-                // for i in start_position..variable_stack.len() {
-                //     arr.push(variable_stack[i].to_dynamic()?.clone());
-                // }
-                // variable_stack.truncate(start_position);
-                // variable_stack.push(DynamicValue::<B>::from_dynamic(rhai::Dynamic::from_array(arr))?);
+            ByteCode::ConstructArray(l) => {
+                let len=*l as usize;
+                if variable_stack.len() < len {
+                    anyhow::bail!("Not enough elements to construct array");
+                }
+                let mut ary = VEC::with_capacity(*l as usize);
+                let start_position = variable_stack.len() - len;
+                for i in start_position..variable_stack.len() {
+                    ary.push(variable_stack[i].get_value(&variables)?);
+                }
+                variable_stack.truncate(start_position+1);
+                variable_stack[start_position]=DynamicValue::<B>::from_basic(B::from_array(ary)?);
             }
             ByteCode::Variable(var_id) => {
                 variable_stack.push(DynamicValue::<B>::from_variable_ref(*var_id)?);
@@ -1007,24 +1008,6 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
                 let res=executer.call_fn(*fn_index,&variable_stack[start_pos..],&mut variables)?;
                 variable_stack.truncate(start_pos);
                 variable_stack.push(res);
-                // let args = variable_stack.split_off(variable_stack.len() - fn_arg_count_sz);
-                // let mut base_values=Vec::with_capacity(fn_arg_count_sz);
-                // for arg in &args{
-                //     base_values.push(arg.deref(&variables)?);
-                // }
-                // let mut res = executer.call_fn(*fn_index, &base_values)?;
-                // let set_len = res.len()-1;
-                // for i in 0..set_len {
-                //     args[set_len-1-i].set_value(&mut variables, res.pop().unwrap())?;
-                // }
-                // match res.pop() {
-                //     Some(r) => {
-                //         variable_stack.push(DynamicValue::<B>::from_basic(r));
-                //     }
-                //     None => {
-                //         variable_stack.push(DynamicValue::<B>::from_unit());
-                //     }
-                // }
             }
             ByteCode::Jump(p) => {
                 pos = *p as usize;
