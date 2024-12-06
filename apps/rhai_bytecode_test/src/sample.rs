@@ -283,6 +283,22 @@ impl SimpleBasicValue {
             }
         }
     }
+    fn negative(&self) -> anyhow::Result<Self> {
+        match self {
+            SimpleBasicValue::Integer(va) => {
+                return Ok(SimpleBasicValue::Integer(-va));
+            }
+            SimpleBasicValue::Float(va) => {
+                return Ok(SimpleBasicValue::Float(-va));
+            }
+            _=>{
+                anyhow::bail!(
+                    "Operator \"-\" can not be applied to \"{:?}\"!",
+                    self
+                );
+            }
+        }
+    }
     fn add(&self,other: &Self) -> anyhow::Result<Self> {
         match (self,other) {
             (Self::Integer(va), Self::Integer(vb)) => {
@@ -612,7 +628,11 @@ fn add(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicVa
 }
 
 fn subtract(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
-    return Ok(DynamicValue::Basic(args[0].deref(variables)?.subtract(args[1].deref(variables)?)?));
+    if args.len() == 2 {
+        return Ok(DynamicValue::Basic(args[0].deref(variables)?.subtract(args[1].deref(variables)?)?));
+    }else{
+        return Ok(DynamicValue::Basic(args[0].deref(variables)?.negative()?));
+    }
 }
 
 fn multiply(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>> {
@@ -733,7 +753,7 @@ pub(crate) fn new_executer() -> anyhow::Result<rhai_bytecode::Executer<SimpleBas
     let mut executer = rhai_bytecode::Executer::<SimpleBasicValue>::new();
     executer.add_fn("!", not,1,1)?;
     executer.add_fn("+", add,2,2)?;
-    executer.add_fn("-", subtract,2,2)?;
+    executer.add_fn("-", subtract,1,2)?;
     executer.add_fn("*", multiply,2,2)?;
     executer.add_fn("/", divide,2,2)?;
     executer.add_fn("%", modulus,2,2)?;
