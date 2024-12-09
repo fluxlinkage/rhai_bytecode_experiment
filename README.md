@@ -22,7 +22,7 @@ This will compile the provided Rhai script test, then run it.
 ## Known Issues
 
 - Experiment Only! i.e. it is unstable and has bugs! Do not use this in production!
-- Many features (for, switch, try, etc) of Rhai not supported yet!
+- Many features (switch, try, etc) of Rhai not supported yet!
 
 ## Benchmarks
 
@@ -33,6 +33,6 @@ The following benchmarks were run on a 4.7GHz Linux ( Debian 12 amd64 ) VM compa
 | Original script size (bytes) | 133 (100%) | 476 (100%) |
 | Compressed script size (bytes) | 127 (95%) | 271 (56%) |
 | Bytecode JSON size (bytes) | 118 (88%) | 560 (117%) |
-| Compressed bytecode JSON size (bytes) | 89 (<font color=green>75%</font>) | 212 (<font color=green>37%</font>) |
-| Median execution time for bytecode (s) | 0.047 (<font color=green>63%</font>) | 0.302 (<font color=green>52%</font>) |
+| Compressed bytecode JSON size (bytes) | 89 (75%) | 212 (37%) |
+| Median execution time for bytecode (s) | 0.047 (63%) | 0.302 (52%) |
 | Median execution time for AST (s) | 0.075 (100%) | 0.586 (100%) |
