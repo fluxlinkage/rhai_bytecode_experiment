@@ -1,35 +1,42 @@
 mod sample;
 
-use rhai_bytecode::{DynamicBasicValue, DynamicValue};
-use sample::SimpleBasicValue;
+use std::cell::RefCell;
+use std::rc::Rc;
+use rhai_bytecode::DynamicValue;
+use sample::SimpleDynamicValue;
 
 fn new_array_for_rhai(l:rhai_bytecode::INT,v:rhai_bytecode::rhai::Dynamic)->rhai_bytecode::rhai::Dynamic{
     return rhai_bytecode::rhai::Dynamic::from_array(vec![v; l as usize]);
 }
 
-fn new_array_for_rhai_bytecode(args: &[DynamicValue<SimpleBasicValue>],variables: &mut Vec<SimpleBasicValue>) -> anyhow::Result<DynamicValue<SimpleBasicValue>>  {
-    let l=args[0].deref(variables)?.to_size()? as usize;
-    return  Ok(DynamicValue::Basic(SimpleBasicValue::Array(rhai_bytecode::new_vec(args[1].deref(variables)?.clone(), l))));
+fn new_array_for_rhai_bytecode(args: &[Rc<RefCell<SimpleDynamicValue>>]) -> anyhow::Result<Rc<RefCell<SimpleDynamicValue>>>  {
+    let l=args[0].borrow().to_size()? as usize; // Never panics when single-threaded.
+    let element = args[1].borrow().clone(); // Never panics when single-threaded.
+    let mut new_ary=rhai_bytecode::VEC::with_capacity(l);
+    for _i in 0..l{
+        new_ary.push(Rc::new(RefCell::new(element.clone())));
+    }
+    return Ok(Rc::new(RefCell::new(SimpleDynamicValue::Array(new_ary))));
 }
 
 fn main() {
     const ROUNDS: usize = 3;
     let script = "//! This script uses the Sieve of Eratosthenes to calculate prime numbers.
-    const MAX_NUMBER_TO_CHECK = 1_000_000;
-    let prime_mask = new_array(MAX_NUMBER_TO_CHECK + 1, true);
-    prime_mask[0] = false;
-    prime_mask[1] = false;
-    let total_primes_found = 0;
-    for p in 2..=MAX_NUMBER_TO_CHECK {
-        if !prime_mask[p] { continue; }
-        total_primes_found += 1;
-        let i = 2 * p;
-        while i <= MAX_NUMBER_TO_CHECK {
-            prime_mask[i] = false;
-            i += p;
-        }
+const MAX_NUMBER_TO_CHECK = 1_000_000;
+let prime_mask = new_array(MAX_NUMBER_TO_CHECK + 1, true);
+prime_mask[0] = false;
+prime_mask[1] = false;
+let total_primes_found = 0;
+for p in 2..=MAX_NUMBER_TO_CHECK {
+    if !prime_mask[p] { continue; }
+    total_primes_found += 1;
+    let i = 2 * p;
+    while i <= MAX_NUMBER_TO_CHECK {
+        prime_mask[i] = false;
+        i += p;
     }
-    total_primes_found";
+}
+total_primes_found";
     let mut engine = rhai_bytecode::rhai::Engine::new();
     engine.register_fn("new_array", new_array_for_rhai);
     let ast = engine.compile(script).unwrap();
@@ -40,14 +47,14 @@ fn main() {
     let json = serde_json::to_string(&byte_codes).unwrap();
     println!("Serilized JSON = {}", json);
     println!("JSON length = {} ({}% of original script)", json.len(),json.len()*100/script.len());
-    let byte_codes_restored = serde_json::from_str::<Vec<rhai_bytecode::ByteCode::<SimpleBasicValue>>>(&json).unwrap();
+    let byte_codes_restored = serde_json::from_str::<Vec<rhai_bytecode::ByteCode>>(&json).unwrap();
     let mut times_byte_code = Vec::<f64>::new();
     let mut times_ast = Vec::<f64>::new();
     println!("Round\tResults\t\tTime");
     println!("\tBytecode\tAST\tBytecode\tAST");
     for r in 0..ROUNDS {
         let now = std::time::Instant::now();
-        let res_byte_code = rhai_bytecode::run_byte_codes::<SimpleBasicValue>(
+        let res_byte_code = rhai_bytecode::run_byte_codes::<SimpleDynamicValue>(
             &executer,
             &byte_codes_restored,
             &vec![],

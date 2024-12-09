@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 pub use rhai;
 use rhai::{Expr, Stmt};
 
@@ -29,173 +31,136 @@ pub fn new_vec<T:Clone>(element:T,size:usize) -> VEC<T> {
     return vec![element;size];
 }
 
-pub trait DynamicBasicValue: Sized + Clone {
-    fn from_dynamic(dynamic: &rhai::Dynamic) -> anyhow::Result<Self>;
-    fn from_unit() -> Self;
+#[derive(Clone,Debug, serde::Serialize, serde::Deserialize)]
+pub enum DynamicConstant {
+    #[serde(rename="U")]
+    Unit,
+    #[serde(rename="B")]
+    Bool(bool),
+    #[serde(rename="I")]
+    Integer(INT),
+    #[serde(rename="F")]
+    Float(FLOAT),
+    #[serde(rename="C")]
+    Char(char),
+    #[serde(rename="S")]
+    String(String),
+    #[serde(rename="A")]
+    Array(VEC<DynamicConstant>),
+    #[serde(rename="R")]
+    Range(INT,INT),
+}
+
+impl DynamicConstant{
+    fn from_dynamic(dynamic: &rhai::Dynamic) -> anyhow::Result<Self> {
+        if dynamic.is_unit() {
+            return Ok(Self::Unit);
+        } else if dynamic.is_bool() {
+            match dynamic.as_bool() {
+                Ok(v) => {
+                    return Ok(Self::Bool(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to bool!");
+                }
+            }
+        } else if dynamic.is_char() {
+            match dynamic.as_char() {
+                Ok(v) => {
+                    return Ok(Self::Char(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to char!");
+                }
+            }
+        } else if dynamic.is_int() {
+            match dynamic.as_int() {
+                Ok(v) => {
+                    return Ok(Self::Integer(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to int!");
+                }
+            }
+        } else if dynamic.is_float() {
+            match dynamic.as_float() {
+                Ok(v) => {
+                    return Ok(Self::Float(v));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to float!");
+                }
+            }
+        } else if dynamic.is_string() {
+           return Ok(Self::String(dynamic.to_string()));
+        }else if dynamic.is_array() {
+            match dynamic.as_array_ref() {
+                Ok(ary) => {
+                    let mut vec=VEC::with_capacity(ary.len());
+                    for item in ary.iter() {
+                        vec.push(Self::from_dynamic(item)?);
+                    }
+                    return Ok(Self::Array(vec));
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to array!");
+                }
+            }
+        }else if dynamic.type_id()== std::any::TypeId::of::<std::ops::Range<INT>>() {
+            match dynamic.clone().try_cast_result::<std::ops::Range<INT>>() {
+                Ok(range) => {
+                    let l=range.end-range.start;
+                    if l < 0 {
+                        anyhow::bail!("Range \"{:?}\"'s start is greater than its end!",range);
+                    } else {
+                        return Ok(Self::Range(range.start,l));
+                    }
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to range!");
+                }
+            }
+        }else if dynamic.type_id()== std::any::TypeId::of::<std::ops::RangeInclusive<INT>>() {
+            match dynamic.clone().try_cast_result::<std::ops::RangeInclusive<INT>>() {
+                Ok(range) => {
+                    // I think this is enough, another type is not needed.
+                    let l=range.end()-range.start();
+                    if l < 0 {
+                        anyhow::bail!("Range \"{:?}\"'s start is greater than its end!",range);
+                    } else {
+                        return Ok(Self::Range(*range.start(),l+1));
+                    }
+                }
+                Err(_) => {
+                    anyhow::bail!("Failed to convert rhai::Dynamic to range!");
+                }
+            }
+        }else{
+            anyhow::bail!("Unsupported type \"{:?}\"!", dynamic.type_name());
+        }
+    }
+}
+
+pub trait DynamicValue: Sized + Clone {
+    fn from_constant(v:DynamicConstant) -> anyhow::Result<Self>;
+    fn from_unit() -> anyhow::Result<Self>;
     fn from_bool(v:bool) -> anyhow::Result<Self>;
     fn from_integer(v:INT) -> anyhow::Result<Self>;
     fn from_float(v:FLOAT) -> anyhow::Result<Self>;
     fn from_char(v:char) -> anyhow::Result<Self>;
-    fn from_string(v:&String) -> anyhow::Result<Self>;
-    fn from_array(v:VEC<Self>) -> anyhow::Result<Self>;
-    fn index_into(&self,ind:SIZE)->anyhow::Result<Self>;
-    fn multi_index_into(&self,inds:&[SIZE])->anyhow::Result<&Self>;
-    fn multi_index_into_mut(&mut self,inds:&[SIZE])->anyhow::Result<&mut Self>;
+    fn from_string(v:String) -> anyhow::Result<Self>;
+    fn from_array(v:VEC<Rc<RefCell<Self>>>) -> anyhow::Result<Self>;
     fn is_unit(&self) -> bool;
     fn to_bool(&self) -> anyhow::Result<bool>;
     fn to_size(&self) -> anyhow::Result<SIZE>;
-    fn set_value(&mut self,inds:&[SIZE],value:Self)->anyhow::Result<()>;
-    fn iter(&self,index:SIZE) -> anyhow::Result<Option<Self>>;
-}
-
-#[derive(Clone, Debug)]
-pub enum DynamicValue<B:DynamicBasicValue+std::fmt::Debug> {
-    Basic(B),
-    Reference(VEC<SIZE>)
-}
-
-impl<B:DynamicBasicValue+std::fmt::Debug> DynamicValue<B> {
-    fn from_basic(basic: B) -> Self{ // Never fails.
-        return Self::Basic(basic);
-    }
-    fn from_unit() -> Self { // Never fails.
-        return Self::from_basic(B::from_unit());
-    }
-    fn from_bool(v: bool) -> anyhow::Result<Self> {
-        return Ok(Self::from_basic(B::from_bool(v)?));
-    }
-    fn from_integer(v: INT) -> anyhow::Result<Self> {
-        return Ok(Self::from_basic(B::from_integer(v)?));
-    }
-    fn from_float(v: FLOAT) -> anyhow::Result<Self> {
-        return Ok(Self::from_basic(B::from_float(v)?));
-    }
-    fn from_char(v: char) -> anyhow::Result<Self> {
-        return Ok(Self::from_basic(B::from_char(v)?));
-    }
-    fn from_string(v: &String) -> anyhow::Result<Self> {
-        return Ok(Self::from_basic(B::from_string(v)?));
-    }
-    fn from_variable_ref(var_id:SIZE) -> anyhow::Result<Self> {
-        let mut vec= VEC::<SIZE>::new();
-        vec.push(var_id);
-        return Ok(Self::Reference(vec));
-    }
-    fn enter_index(&mut self, ind: SIZE) -> anyhow::Result<()> {
-        match self {
-            Self::Basic(dynamic_basic_value) => {
-                *self=Self::Basic(dynamic_basic_value.index_into(ind)?);
-                return Ok(());
-            }
-            Self::Reference(inds) => {
-                inds.push(ind);
-                return Ok(());
-            }
-        }
-    }
-    fn is_unit(&self,variables: &Vec<B>) -> anyhow::Result<bool>{
-        return Ok(self.deref(variables)?.is_unit());
-    }
-    fn to_bool(&self,variables: &Vec<B>) -> anyhow::Result<bool>{
-        return self.deref(variables)?.to_bool();
-    }
-    fn to_size(&self,variables: &Vec<B>) -> anyhow::Result<SIZE>{
-        return self.deref(variables)?.to_size();
-    }
-    // fn iter(&self,index_var: &Self,variables: &mut Vec<B>) -> anyhow::Result<Option<B>>{
-    //     let index=index_var.get_value(variables)?.to_size()?;
-    //     let (res,new_index)=self.deref(variables)?.iter(index)?;
-    //     if new_index==SIZE::MAX {
-    //         return Ok(None);
-    //     }else {
-    //         index_var.set_value(variables,B::from_integer(new_index as INT)?)?;
-    //         return Ok(Some(res));
-    //     }
-    // }
-    pub fn to_basic(&self) -> anyhow::Result<&B> {
-        match self {
-            DynamicValue::Basic(v) => {
-                return Ok(v);
-            }
-            DynamicValue::Reference(..) => {
-                anyhow::bail!("Variable \"{:?}\" is not a basic value!",self);
-            }
-        }
-    }
-    pub fn deref<'a>(&'a self,variables: &'a Vec<B>) -> anyhow::Result<&'a B>{
-        match self {
-            Self::Basic(dynamic_basic_value) => {
-                return Ok(dynamic_basic_value);
-            }
-            Self::Reference(inds) => {
-                match inds.first() {
-                    Some(var_id) => {
-                        return variables[*var_id as usize].multi_index_into(&inds[1..]);
-                    },
-                    None => {
-                        anyhow::bail!("Missing variable index!");
-                    }
-                }
-            }
-        }
-    }
-    pub fn deref_mut<'a>(&self,variables: &'a mut Vec<B>) -> anyhow::Result<&'a mut B>{
-        match self {
-            Self::Basic(_) => {
-                anyhow::bail!("Variable \"{:?}\" is not a reference!", self);
-            }
-            Self::Reference(inds) => {
-                match inds.first() {
-                    Some(var_id) => {
-                        return variables[*var_id as usize].multi_index_into_mut(&inds[1..]);
-                    },
-                    None => {
-                        anyhow::bail!("Missing variable index!");
-                    }
-                }
-            }
-        }
-    }
-    pub fn get_value(&self,variables: &Vec<B>) -> anyhow::Result<B> {
-        match self {
-            Self::Basic(dynamic_basic_value) => {
-                return Ok(dynamic_basic_value.clone());
-            }
-            Self::Reference(inds) => {
-                match inds.first() {
-                    Some(var_id) => {
-                        return Ok(variables[*var_id as usize].multi_index_into(&inds[1..])?.clone());
-                    },
-                    None => {
-                        anyhow::bail!("Missing variable index!");
-                    }
-                }
-            }
-        }
-    }
-    pub fn set_value(&self,variables: &mut Vec<B>,val:B) -> anyhow::Result<()>{
-        match self {
-            Self::Basic(..) => {
-                anyhow::bail!("Variable \"{:?}\" is not a reference!", self);
-            }
-            Self::Reference(inds) => {
-                match inds.first() {
-                    Some(var_id) => {
-                        return variables[*var_id as usize].set_value(&inds[1..], val);
-                    },
-                    None => {
-                        anyhow::bail!("Missing variable index!");
-                    }
-                }
-            }
-        }
-    }
+    fn index_into(&self,ind:SIZE)->anyhow::Result<Rc<RefCell<Self>>>;
+    fn iter(&self,index:SIZE) -> anyhow::Result<Option<Rc<RefCell<Self>>>>;
 }
 
 #[derive(Clone,Debug,serde::Serialize, serde::Deserialize)]
-pub enum ByteCode<B:DynamicBasicValue> {
+pub enum ByteCode {
     #[serde(rename="DC")]
-    DynamicConstant(B),
+    DynamicConstant(DynamicConstant),
     #[serde(rename="UC")]
     UnitConstant,
     #[serde(rename="BC")]
@@ -236,13 +201,13 @@ pub enum ByteCode<B:DynamicBasicValue> {
     PopStack,
 }
 
-pub struct Executer<B: DynamicBasicValue+std::fmt::Debug> {
+pub struct Executer<B: DynamicValue+std::fmt::Debug> {
     fn_names: Vec<String>,
-    fns: Vec<Box<dyn Fn(&[DynamicValue<B>],&mut Vec<B>) -> anyhow::Result<DynamicValue<B>>>>,
+    fns: Vec<Box<dyn Fn(&[Rc<RefCell<B>>]) -> anyhow::Result<Rc<RefCell<B>>>>>,
     fn_arg_ranges: Vec<(SIZE,SIZE)>,
 }
 
-impl<B: DynamicBasicValue+std::fmt::Debug> Executer<B> {
+impl<B: DynamicValue+std::fmt::Debug> Executer<B> {
     pub fn new() -> Self {
         return Self {
             fn_names: vec![],
@@ -253,7 +218,7 @@ impl<B: DynamicBasicValue+std::fmt::Debug> Executer<B> {
     fn function_names(&self) -> &Vec<String> {
         return &self.fn_names;
     }
-    pub fn add_fn<F:Fn(&[DynamicValue<B>],&mut Vec<B>) -> anyhow::Result<DynamicValue<B>>+'static>(
+    pub fn add_fn<F:Fn(&[Rc<RefCell<B>>]) -> anyhow::Result<Rc<RefCell<B>>>+'static>(
         &mut self,
         name: impl ToString,
         func: F,
@@ -290,9 +255,9 @@ impl<B: DynamicBasicValue+std::fmt::Debug> Executer<B> {
         }
         return  Ok(());
     }
-    fn call_fn(&self, index: SIZE, args: &[DynamicValue<B>],variables:&mut Vec<B>) -> anyhow::Result<DynamicValue<B>> {
+    fn call_fn(&self, index: SIZE, args: &[Rc<RefCell<B>>]) -> anyhow::Result<Rc<RefCell<B>>> {
         let ind = index as usize;
-        return self.fns[ind](args,variables);
+        return self.fns[ind](args);
     }
 }
 
@@ -312,18 +277,18 @@ fn append_return_index(vec: &mut Vec<String>, name: &str) -> SIZE {
     return (vec.len() - 1) as SIZE;
 }
 
-fn append_expr<B:DynamicBasicValue>(
+fn append_expr(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
     max_variable_count: &mut SIZE,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
-    byte_codes: &mut Vec<ByteCode<B>>,
+    byte_codes: &mut Vec<ByteCode>,
     expr: &Expr,
 ) -> anyhow::Result<()> {
     match expr {
         Expr::DynamicConstant(dynamic, _) => {
-            byte_codes.push(ByteCode::DynamicConstant(B::from_dynamic(dynamic)?));
+            byte_codes.push(ByteCode::DynamicConstant(DynamicConstant::from_dynamic(dynamic)?));
         }
         Expr::BoolConstant(v, _) => {
             byte_codes.push(ByteCode::BoolConstant(*v));
@@ -521,13 +486,13 @@ fn append_expr<B:DynamicBasicValue>(
     return Ok(());
 }
 
-fn append_stmt<B:DynamicBasicValue>(
+fn append_stmt(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
     max_variable_count: &mut SIZE,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
-    byte_codes: &mut Vec<ByteCode<B>>,
+    byte_codes: &mut Vec<ByteCode>,
     stmt: &Stmt,
 ) -> anyhow::Result<()> {
     match stmt {
@@ -816,7 +781,7 @@ fn append_stmt<B:DynamicBasicValue>(
     return Ok(());
 }
 
-fn trace_jump<B: DynamicBasicValue+std::fmt::Debug>(init_pos:SIZE,byte_codes: &Vec<ByteCode<B>>)->SIZE {
+fn trace_jump(init_pos:SIZE,byte_codes: &Vec<ByteCode>)->SIZE {
     let init_pos_sz= init_pos as usize;
     if init_pos_sz < byte_codes.len() {
         match byte_codes[init_pos_sz] {
@@ -829,13 +794,13 @@ fn trace_jump<B: DynamicBasicValue+std::fmt::Debug>(init_pos:SIZE,byte_codes: &V
     return init_pos;
 }
 
-pub fn ast_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
+pub fn ast_to_byte_codes<B: DynamicValue+std::fmt::Debug>(
     executer: &Executer<B>,
     initial_variables: &mut Vec<String>,
     ast: &rhai::AST,
-) -> anyhow::Result<Vec<ByteCode<B>>> {
+) -> anyhow::Result<Vec<ByteCode>> {
     let functions = executer.function_names();
-    let mut byte_codes = Vec::<ByteCode<B>>::new();
+    let mut byte_codes = Vec::<ByteCode>::new();
     let mut break_pos = Vec::<usize>::new();
     let mut continue_pos = Vec::<usize>::new();
     let mut max_variable_count=initial_variables.len() as SIZE;
@@ -885,29 +850,29 @@ pub fn ast_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
     return Ok(byte_codes);
 }
 
-pub fn script_to_byte_codes<B: DynamicBasicValue+std::fmt::Debug>(
+pub fn script_to_byte_codes<B: DynamicValue+std::fmt::Debug>(
     executer: &Executer<B>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode<B>>,> {
+) -> anyhow::Result<Vec<ByteCode>,> {
     let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile(script))?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
 
-pub fn script_to_byte_codes_expression<B: DynamicBasicValue+std::fmt::Debug>(
+pub fn script_to_byte_codes_expression<B: DynamicValue+std::fmt::Debug>(
     executer: &Executer<B>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode<B>>> {
+) -> anyhow::Result<Vec<ByteCode>> {
     let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile_expression(script))?;
     return ast_to_byte_codes(executer, initial_variables, &ast);
 }
 
-pub fn script_to_byte_codes_expression_no_new_variables<B: DynamicBasicValue+std::fmt::Debug>(
+pub fn script_to_byte_codes_expression_no_new_variables<B: DynamicValue+std::fmt::Debug>(
     executer: &Executer<B>,
     initial_variables: &mut Vec<String>,
     script: &str,
-) -> anyhow::Result<Vec<ByteCode<B>>> {
+) -> anyhow::Result<Vec<ByteCode>> {
     let ast=COMPILE_ENGINE.with_borrow(|engine|engine.compile_expression(script))?;
     let init_len = initial_variables.len();
     let res = ast_to_byte_codes(executer, initial_variables, &ast)?;
@@ -919,13 +884,12 @@ pub fn script_to_byte_codes_expression_no_new_variables<B: DynamicBasicValue+std
     }
 }
 
-pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
+pub fn run_byte_codes<B:DynamicValue+std::fmt::Debug>(
     executer: &Executer<B>,
-    byte_codes: &Vec<ByteCode<B>>,
+    byte_codes: &Vec<ByteCode>,
     init_vars: &Vec<B>,
 ) -> anyhow::Result<B> {
     let mut max_var_id=0 as SIZE;
-    //let mut max_fn_id=0 as OpSize;
     for byte_code in byte_codes {
         match byte_code {
             ByteCode::Variable(var_id) => {
@@ -934,51 +898,45 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
                 }
             }
             ByteCode::FnCall(fn_id, arg_count) => {
-                // if *fn_id > max_fn_id {
-                //     max_fn_id=*fn_id;
-                // }
                 executer.check_fn_arg_count(*fn_id, *arg_count)?;
             }
             _=>{}
         }
     }
-    // if max_fn_id as usize >= executer.function_names().len() {
-    //     anyhow::bail!("Function #{} does not exist!", max_fn_id);
-    // }
     let var_count=max_var_id as usize+1;
-    let mut variables=Vec::<B>::with_capacity(var_count);
+    let mut variables=Vec::<Rc<RefCell<B>>>::with_capacity(var_count);
     let init_len=usize::min(var_count, init_vars.len());
     for i in 0..init_len {
-        variables.push(init_vars[i].clone());
+        variables.push(Rc::new(RefCell::new(init_vars[i].clone())));
     }
     for _i in init_len..var_count {
-        variables.push(B::from_unit());
+        variables.push(Rc::new(RefCell::new(B::from_unit()?)));
     }
-    let mut variable_stack = Vec::<DynamicValue::<B>>::new();
+    let mut variable_stack = Vec::<Rc<RefCell<B>>>::new();
     let mut pos = 0usize;
     while pos < byte_codes.len() {
         //println!("{}: {:?}", pos, byte_codes[pos]);
         match &byte_codes[pos] {
             ByteCode::DynamicConstant(dynamic) => {
-                variable_stack.push(DynamicValue::<B>::from_basic(dynamic.clone()));
+                variable_stack.push(Rc::new(RefCell::new(B::from_constant(dynamic.to_owned())?)));
             }
             ByteCode::UnitConstant => {
-                variable_stack.push(DynamicValue::<B>::from_unit());
+                variable_stack.push(Rc::new(RefCell::new(B::from_unit()?)));
             }
             ByteCode::BoolConstant(v) => {
-                variable_stack.push(DynamicValue::<B>::from_bool(*v)?);
+                variable_stack.push(Rc::new(RefCell::new(B::from_bool(*v)?)));
             }
             ByteCode::IntegerConstant(v) => {
-                variable_stack.push(DynamicValue::<B>::from_integer(*v)?);
+                variable_stack.push(Rc::new(RefCell::new(B::from_integer(*v)?)));
             }
             ByteCode::FloatConstant(v) => {
-                variable_stack.push(DynamicValue::<B>::from_float(*v)?);
+                variable_stack.push(Rc::new(RefCell::new(B::from_float(*v)?)));
             }
             ByteCode::CharConstant(v) => {
-                variable_stack.push(DynamicValue::<B>::from_char(*v)?);
+                variable_stack.push(Rc::new(RefCell::new(B::from_char(*v)?)));
             }
             ByteCode::StringConstant(v) => {
-                variable_stack.push(DynamicValue::<B>::from_string(v)?);
+                variable_stack.push(Rc::new(RefCell::new(B::from_string(v.to_owned())?)));
             }
             ByteCode::InterpolatedString(_) => {
                 anyhow::bail!("InterpolatedString not supported yet!");
@@ -988,16 +946,11 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
                 if variable_stack.len() < len {
                     anyhow::bail!("Not enough elements to construct array");
                 }
-                let mut ary = VEC::with_capacity(*l as usize);
-                let start_position = variable_stack.len() - len;
-                for i in start_position..variable_stack.len() {
-                    ary.push(variable_stack[i].get_value(&variables)?);
-                }
-                variable_stack.truncate(start_position+1);
-                variable_stack[start_position]=DynamicValue::<B>::from_basic(B::from_array(ary)?);
+                let ary=variable_stack.split_off(variable_stack.len() - len);
+                variable_stack.push(Rc::new(RefCell::new(B::from_array(ary)?)));
             }
             ByteCode::Variable(var_id) => {
-                variable_stack.push(DynamicValue::<B>::from_variable_ref(*var_id)?);
+                variable_stack.push(variables[*var_id as usize].clone());
             }
             ByteCode::FnCall(fn_index, fn_arg_count) => {
                 let fn_arg_count_sz = *fn_arg_count as usize;
@@ -1005,9 +958,11 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
                     anyhow::bail!("Not enough arguments for function call!");
                 }
                 let start_pos=variable_stack.len() - fn_arg_count_sz;
-                let res=executer.call_fn(*fn_index,&variable_stack[start_pos..],&mut variables)?;
+                let res=executer.call_fn(*fn_index,&variable_stack[start_pos..])?;
                 variable_stack.truncate(start_pos);
                 variable_stack.push(res);
+                // variable_stack.truncate(start_pos+1);
+                // variable_stack[start_pos]=res;
             }
             ByteCode::Jump(p) => {
                 pos = *p as usize;
@@ -1015,7 +970,7 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             }
             ByteCode::JumpIfTrue(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if val.to_bool(&variables)? {
+                    if val.borrow().to_bool()? { // Never panics when single-threaded.
                         pos = *p as usize;
                         continue;
                     }
@@ -1026,7 +981,7 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             },
             ByteCode::JumpIfFalse(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if !val.to_bool(&variables)? {
+                    if !val.borrow().to_bool()? { // Never panics when single-threaded.
                         pos = *p as usize;
                         continue;
                     }
@@ -1037,7 +992,7 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             },
             ByteCode::JumpIfNotNull(p) => match variable_stack.pop() {
                 Some(val) => {
-                    if !val.is_unit(&variables)? {
+                    if !val.borrow().is_unit() { // Never panics when single-threaded.
                         pos = *p as usize;
                         continue;
                     }
@@ -1048,7 +1003,7 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             },
             ByteCode::VarInit(var_id) => match variable_stack.last() {
                 Some(val) => {
-                    variables[*var_id as usize]=val.deref(&variables)?.clone();
+                    variables[*var_id as usize]=val.clone();
                 }
                 None => {
                     anyhow::bail!("Not enough arguments for variable declare!");
@@ -1057,7 +1012,9 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             ByteCode::Index => match variable_stack.pop() {
                 Some(ind) => match variable_stack.last_mut() {
                     Some(r) => {
-                        r.enter_index(ind.to_size(&variables)?)?;
+                        let index=ind.borrow().to_size()?; // Never panics when single-threaded.
+                        let res=r.borrow().index_into(index)?; // Never panics when single-threaded.
+                        *r=res;
                     }
                     None => {
                         anyhow::bail!("Not enough arguments for index!");
@@ -1069,7 +1026,7 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
             },
             ByteCode::Return => match variable_stack.pop() {
                 Some(value) => {
-                    return Ok(value.deref(&variables)?.to_owned());
+                    return Ok(value.borrow().to_owned()); // Never panics when single-threaded.
                 }
                 None => {
                     anyhow::bail!("Missing return value!");
@@ -1079,38 +1036,19 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
                 variable_stack.pop();
             }
             ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,p) => {
-                let index=variables[*loop_index_id as usize].to_size()?;
-                match variables[*loop_range_id as usize].iter(index)? {
+                let index=variables[*loop_index_id as usize].borrow().to_size()?; // Never panics when single-threaded.
+                let index_res=variables[*loop_range_id as usize].borrow().iter(index)?; // Never panics when single-threaded.
+                match index_res {
                     Some(v) => {
                         variables[*loop_var_id as usize]=v;
                         let new_index=index+1;
-                        variables[*loop_index_id as usize]=B::from_integer(new_index as INT)?;
+                        variables[*loop_index_id as usize]=Rc::new(RefCell::new(B::from_integer(new_index as INT)?));
                     }
                     None => {
                         pos = *p as usize;
                         continue;
                     }
                 }
-                //let (val,new_index)=variables[*loop_range_id as usize].iter(variables[*loop_index_id as usize].to_size()?)?;
-                // let stack_len = variable_stack.len();
-                // if stack_len<3 {
-                //     anyhow::bail!("Not enough arguments for iteration!");
-                // } else {
-                //     let range=&variable_stack[stack_len-3];
-                //     let index=&variable_stack[stack_len-2];
-                //     let var=&variable_stack[stack_len-1];
-                //     match range.iter(index,&mut variables)? {
-                //         Some(v) => {
-                //             var.set_value(&mut variables, v)?;
-                //             variable_stack.truncate(stack_len-3);
-                //         }
-                //         None => {
-                //             variable_stack.truncate(stack_len-3);
-                //             pos = *p as usize;
-                //             continue;
-                //         }
-                //     }
-                // }
             }
         }
         pos += 1;
@@ -1118,10 +1056,10 @@ pub fn run_byte_codes<B:DynamicBasicValue+std::fmt::Debug>(
     //println!("Stack size: {}",variable_stack.len());
     match variable_stack.pop() {
         Some(value) =>{
-            return Ok(value.deref(&variables)?.to_owned());
+            return Ok(value.borrow().to_owned()); // Never panics when single-threaded.
         }
         None => {
-            return Ok(B::from_unit());
+            return Ok(B::from_unit()?);
         }
     }
 }
