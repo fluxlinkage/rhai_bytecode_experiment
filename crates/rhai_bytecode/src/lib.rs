@@ -280,7 +280,6 @@ fn append_return_index(vec: &mut Vec<String>, name: &str) -> SIZE {
 fn append_expr(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
-    max_variable_count: &mut SIZE,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
     byte_codes: &mut Vec<ByteCode>,
@@ -310,7 +309,6 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -324,7 +322,6 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -357,7 +354,6 @@ fn append_expr(
                 append_stmt(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -370,7 +366,6 @@ fn append_expr(
                 append_expr(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -390,7 +385,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -399,7 +393,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -411,7 +404,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -422,7 +414,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -434,7 +425,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -445,7 +435,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -457,7 +446,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -468,7 +456,6 @@ fn append_expr(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -489,7 +476,6 @@ fn append_expr(
 fn append_stmt(
     functions: &Vec<String>,
     variables: &mut Vec<String>,
-    max_variable_count: &mut SIZE,
     break_pos: &mut Vec<usize>,
     continue_pos: &mut Vec<usize>,
     byte_codes: &mut Vec<ByteCode>,
@@ -503,7 +489,6 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -516,7 +501,6 @@ fn append_stmt(
                 append_stmt(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -535,7 +519,6 @@ fn append_stmt(
                     append_stmt(
                         functions,
                         variables,
-                        max_variable_count,
                         break_pos,
                         continue_pos,
                         byte_codes,
@@ -557,7 +540,6 @@ fn append_stmt(
                     append_expr(
                         functions,
                         variables,
-                        max_variable_count,
                         break_pos,
                         continue_pos,
                         byte_codes,
@@ -574,7 +556,6 @@ fn append_stmt(
                 append_stmt(
                     functions,
                     variables,
-                    max_variable_count,
                     &mut new_break_pos,
                     &mut new_continue_pos,
                     byte_codes,
@@ -607,7 +588,6 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -631,7 +611,6 @@ fn append_stmt(
                 append_stmt(
                     functions,
                     variables,
-                    max_variable_count,
                     &mut new_break_pos,
                     &mut new_continue_pos,
                     byte_codes,
@@ -653,16 +632,12 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
                 &data.1,
             )?;
             let var_id = append_return_index(variables, data.0.as_str());
-            if var_id+1>*max_variable_count {
-                *max_variable_count=var_id+1;
-            }
             byte_codes.push(ByteCode::VarInit(var_id));
             byte_codes.push(ByteCode::PopStack);
         }
@@ -670,7 +645,6 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -679,7 +653,6 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -698,7 +671,6 @@ fn append_stmt(
                 append_expr(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -715,7 +687,6 @@ fn append_stmt(
                 append_stmt(
                     functions,
                     variables,
-                    max_variable_count,
                     break_pos,
                     continue_pos,
                     byte_codes,
@@ -731,7 +702,6 @@ fn append_stmt(
             append_expr(
                 functions,
                 variables,
-                max_variable_count,
                 break_pos,
                 continue_pos,
                 byte_codes,
@@ -757,7 +727,6 @@ fn append_stmt(
                         append_expr(
                             functions,
                             variables,
-                            max_variable_count,
                             break_pos,
                             continue_pos,
                             byte_codes,
@@ -803,12 +772,10 @@ pub fn ast_to_byte_codes<B: DynamicValue+std::fmt::Debug>(
     let mut byte_codes = Vec::<ByteCode>::new();
     let mut break_pos = Vec::<usize>::new();
     let mut continue_pos = Vec::<usize>::new();
-    let mut max_variable_count=initial_variables.len() as SIZE;
     for stmt in ast.statements() {
         append_stmt(
             functions,
             initial_variables,
-            &mut max_variable_count,
             &mut break_pos,
             &mut continue_pos,
             &mut byte_codes,
