@@ -19,8 +19,14 @@ fn new_array_for_rhai_bytecode(args: &[Rc<RefCell<SimpleDynamicValue>>]) -> anyh
     return Ok(Rc::new(RefCell::new(SimpleDynamicValue::Array(new_ary))));
 }
 
+fn compress_data( dat:&[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut encoder, dat).expect("Failed to write data");
+    return encoder.finish().expect("Failed to finish compression");
+}
+
 fn main() {
-    const ROUNDS: usize = 3;
+    const ROUNDS: usize = 9;
     let script = "//! This script uses the Sieve of Eratosthenes to calculate prime numbers.
 const MAX_NUMBER_TO_CHECK = 1_000_000;
 let prime_mask = new_array(MAX_NUMBER_TO_CHECK + 1, true);
@@ -46,7 +52,12 @@ total_primes_found";
     let byte_codes= rhai_bytecode::ast_to_byte_codes(&executer, &mut variable_names, &ast).unwrap();
     let json = serde_json::to_string(&byte_codes).unwrap();
     println!("Serilized JSON = {}", json);
+    let compressed_script=compress_data(script.as_bytes());
+    let compressed_byte_codes=compress_data(json.as_bytes());
+    println!("Original script length = {} ({}% of original script)", script.len(),100);
+    println!("Compressed script length = {} ({}% of original script)", compressed_script.len(),compressed_script.len()*100/script.len());
     println!("JSON length = {} ({}% of original script)", json.len(),json.len()*100/script.len());
+    println!("Compressed JSON length = {} ({}% of original JSON)", compressed_byte_codes.len(),compressed_byte_codes.len()*100/json.len());
     let byte_codes_restored = serde_json::from_str::<Vec<rhai_bytecode::ByteCode>>(&json).unwrap();
     let mut times_byte_code = Vec::<f64>::new();
     let mut times_ast = Vec::<f64>::new();
