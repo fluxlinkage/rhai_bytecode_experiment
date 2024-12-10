@@ -28,11 +28,13 @@ This will compile the provided Rhai script test, then run it.
 
 The following benchmarks were run on a 4.7GHz Linux ( Debian 12 amd64 ) VM comparing bytecodes with Rhai ASTs.
 
+Benchmarks were performed on Dec 10, 2024. Newer versions may have different results.
+
 | Indicators | [1M Loop](scripts/speed_test.rhai) | [Prime numbers](scripts/prime.rhai) |
 | :---: | :---: | :---: |
 | Original script size (bytes) | 133 (100%) | 476 (100%) |
 | Compressed script size (bytes) | 127 (95%) | 271 (56%) |
 | Bytecode JSON size (bytes) | 118 (88%) | 560 (117%) |
-| Compressed bytecode JSON size (bytes) | 89 (75%) | 212 (37%) |
-| Median execution time for bytecode (s) | 0.047 (63%) | 0.302 (52%) |
-| Median execution time for AST (s) | 0.075 (100%) | 0.586 (100%) |
+| Compressed bytecode JSON size (bytes) | 89 (66%) | 212 (44%) |
+| Median execution time for bytecode (s) | 0.048 (62%) | 0.292 (49%) |
+| Median execution time for AST (s) | 0.077 (100%) | 0.591 (100%) |

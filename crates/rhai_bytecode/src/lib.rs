@@ -575,8 +575,43 @@ fn append_stmt(
                 byte_codes[jz_pos] = ByteCode::JumpIfFalse(end_pos as SIZE);
             }
         }
-        Stmt::Do(..) => {
-            anyhow::bail!("\"do\" not supported yet!");
+        Stmt::Do(flow_control,astflags,_) => {
+            let start_pos = byte_codes.len();
+            let mut new_break_pos = Vec::<usize>::new();
+            let mut new_continue_pos = Vec::<usize>::new();
+            let var_len=variables.len();
+            for sub_stmt in &flow_control.body {
+                append_stmt(
+                    functions,
+                    variables,
+                    &mut new_break_pos,
+                    &mut new_continue_pos,
+                    byte_codes,
+                    sub_stmt,
+                )?;
+            }
+            let compare_pos = byte_codes.len();
+            append_expr(
+                functions,
+                variables,
+                break_pos,
+                continue_pos,
+                byte_codes,
+                &flow_control.expr,
+            )?;
+            if (*astflags & rhai::ASTFlags::BREAK) == rhai::ASTFlags::NEGATED {
+                byte_codes.push(ByteCode::JumpIfFalse(start_pos as SIZE));
+            }else{
+                byte_codes.push(ByteCode::JumpIfTrue(start_pos as SIZE));
+            }
+            let end_pos = byte_codes.len();
+            variables.truncate(var_len);
+            for pos_break in &new_break_pos {
+                byte_codes[*pos_break] = ByteCode::Jump(end_pos as SIZE);
+            }
+            for pos_continue in &new_continue_pos {
+                byte_codes[*pos_continue] = ByteCode::Jump(compare_pos as SIZE);
+            }
         }
         Stmt::For(data, _) => {
             let loop_var_id = append_return_index(variables, data.0.as_str());
@@ -599,10 +634,6 @@ fn append_stmt(
             byte_codes.push(ByteCode::VarInit(loop_index_id));
             byte_codes.push(ByteCode::PopStack);
             let start_pos = byte_codes.len();
-            // byte_codes.push(ByteCode::Variable(loop_range_id));
-            // byte_codes.push(ByteCode::Variable(loop_index_id));
-            // byte_codes.push(ByteCode::Variable(loop_var_id));
-            // let jz_pos = byte_codes.len();
             byte_codes.push(ByteCode::Iter(loop_range_id,loop_index_id,loop_var_id,0));
             let mut new_break_pos = Vec::<usize>::new();
             let mut new_continue_pos = Vec::<usize>::new();
